@@ -89,6 +89,16 @@ wdft::DiodeT<double, decltype(next), wdft::DiodeQuality::Best, AccurateOmega> d 
 
 ### Asymmetric clip modes & even harmonics — use a PER-POLARITY diode mismatch
 
+**Check captures for asymmetric harmonics on EVERY saturation stage, even ones the schematic draws
+as a textbook-symmetric antiparallel pair.** The schematic tells you the nominal topology, not the
+component tolerance or the DC bias point the real circuit actually sits at — both of which show up
+only in a captured harmonic spectrum, never in the drawing. Don't reason "the schematic shows a
+matched pair, so I can skip the even-harmonic check" — run the low-frequency-tone FFT (calibration
+doc §6b, "Validating clipping: harmonics, saturation, and the 'go hotter' trap") against a real
+capture for every clip mode before
+concluding a stage is symmetric. The rest of this section exists because that check found even
+harmonics on the reference build's *nominally symmetric* positions, not just its dedicated asym mode.
+
 `DiodePairT` is **symmetric**; `DiodeT` is **one-sided** (clips one polarity, the other runs to the
 rail → strongly even-dominant). Two real-pedal facts to reproduce: (a) a dedicated "asym" switch
 position is asymmetric (strong-ish even harmonics); (b) even the *nominally symmetric* positions show

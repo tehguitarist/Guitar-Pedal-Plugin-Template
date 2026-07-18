@@ -11,24 +11,55 @@ levels; this one verifies them and the rest of the model against the real thing)
 The reusable harness lives in `analysis/`:
 - `gen_test_signal.py` — the comprehensive A/B signal (full-range sweep + 3 driven sweeps for THD +
   level steps + discrete tones + IMD + decay notes). Single source of truth for segment timings.
-- `analyze.py` — reusable primitives: load/align, `transfer` (FR), `thd` (discrete) +
-  `harmonic_thd_curve` (continuous Farina swept THD), `frac_align`/`null_depth` (sub-sample null),
-  `parse_filename` (clock + 0-10 notations), `is_full_length` (truncation guard).
+- `analyze.py` — reusable primitives: load/align, `normalize_gain` (level-match before shape
+  comparison), `transfer` + `band_response` (31-band FR), `thd` (discrete) + `harmonic_thd_curve`
+  (continuous Farina swept THD) + `banded_thd` (100 Hz–12 kHz subset of the FR grid, per-harmonic),
+  `frac_align`/`null_depth` (sub-sample null), `parse_filename` (clock + 0-10 notations),
+  `is_full_length` (truncation guard).
 
 ---
 
+## 0. Normalize level before comparing SHAPE — but don't let it hide a real calibration gap
+
+Every FR/THD/harmonic-placement comparison below is about **shape**, not absolute level — so
+level-normalize `test` onto `ref` first with `normalize_gain()` (least-squares scalar match) before
+running `transfer()` or `banded_thd()`, or a pure level offset from the plugin/capture-gain mismatch
+will read as a tonal or distortion-amount difference it isn't. `normalize_gain()` returns the applied
+gain in dB alongside the scaled signal — **always look at that number, don't discard it**:
+
+- A gain that varies capture-to-capture with no pattern is ordinary capture-level noise — fine to
+  normalize away per-comparison.
+- The **same** gain offset appearing consistently across many captures is a real input/output
+  calibration gap (§4 below, and `calibration-and-gain-staging.md` §2) — normalizing it away
+  capture-by-capture would hide the very thing §4's decomposition is for. Track it, don't silently
+  absorb it.
+
 ## 1. The four analyses (what each answers)
 
-1. **Frequency response** — 1/3-octave (≈30 pts, 20 Hz–20 kHz) from the **clean** sweep via
-   `transfer()`. Read EQ ONLY from the clean (low-level) sweep so clip harmonics don't pollute the
-   tone fit. This is your taper/tone-stack accuracy check.
+1. **Frequency response** — the **standard 31-band 1/3-octave grid, 20 Hz–20 kHz**
+   (`analyze.py`'s `THIRD_OCTAVE_31_CENTERS`) sampled from the **clean** sweep's continuous curve
+   via `transfer()` + `band_response()`. Read EQ ONLY from the clean (low-level) sweep so clip
+   harmonics don't pollute the tone fit. This is your taper/tone-stack accuracy check, and it's the
+   full-range grid everything else below is defined relative to.
 2. **THD by frequency band** — `harmonic_thd_curve()` deconvolves a **driven** sweep (Farina
    exponential-sweep harmonic separation) into a **continuous** THD(f) curve from a single capture —
-   no need for hundreds of discrete tones. Pay attention to the 1–8 kHz band (where most saturation
-   character lives). **VALIDATE the swept curve against the discrete-tone `thd()` at the same
-   frequencies before trusting it** — if they disagree, the deconvolution/gating is wrong, fix it
-   first. (On the reference build, tightening the harmonic gate to 35% of the inter-order gap took
-   the swept curve from ~25% high to within ~1% of the discrete tones.)
+   no need for hundreds of discrete tones. **VALIDATE the swept curve against the discrete-tone
+   `thd()` at the same frequencies before trusting it** — if they disagree, the deconvolution/gating
+   is wrong, fix it first. (On the reference build, tightening the harmonic gate to 35% of the
+   inter-order gap took the swept curve from ~25% high to within ~1% of the discrete tones.)
+
+   For the actual pass/fail check, don't stop at the continuous curve — bucket it with
+   `banded_thd()`, which reuses **the same 31-band grid as the FR analysis above** but reports only
+   the **100 Hz–12 kHz subset** of it (where most saturation character lives, and where the driven
+   sweep has usable SNR) — it is not a separate band layout, so a THD band and an FR band at the
+   same center line up exactly. Report, per band: aggregate THD% AND each harmonic order's
+   amplitude relative to the fundamental (dB). Two circuits can land on the same aggregate THD%
+   with completely different harmonic **placement** (which bands carry the distortion) and
+   **balance** (which orders dominate in each band) — the per-band, per-order breakdown is what
+   actually validates clip character, the single-number THD curve only validates clip *amount*.
+   Cross-reference against the low-frequency discrete-tone harmonic check in
+   `calibration-and-gain-staging.md` §6b, which validates even/odd balance at one frequency in
+   detail; `banded_thd()` extends that check across the 100 Hz–12 kHz range.
 3. **Null test** — `frac_align()` then `null_depth()`: sub-sample align, optimal-gain level-match,
    subtract, report residual dB. **It measures timbre/shape/phase, NOT absolute level** (the gain
    match removes level). Report the BEST null (cleanest linear setting — the README headline) and
@@ -68,6 +99,17 @@ CLI args. Build it as a `juce_add_console_app` target (see `build.md`). Then eac
 parse filename → render plugin at those settings → `align` both to the reference → compare per §1.
 Use OS 8x for the comparison to take aliasing off the table. `analyze.py` is pedal-agnostic; only
 the OfflineRender arg layout is per-pedal.
+
+**`OfflineRender` must write 32-bit float WAV, never 16/24-bit integer PCM.**
+`calibration-and-gain-staging.md` §2 is explicit that output exceeding 0 dBFS at high drive+volume
+is faithful, expected behaviour, not a bug to pad away — so a render batch WILL legitimately contain
+samples >1.0 at those settings. Writing that through an integer format hard-clips (or wraps) it at
+the format's ceiling, silently corrupting exactly the high-drive captures where THD/harmonic-balance
+accuracy matters most, while looking like a normal WAV file (no error, no warning) right up until
+the analysis numbers come out wrong. `analyze.py`'s `load()` warns if it's handed an integer-PCM
+file for this reason — treat that warning as a real problem, not noise, for any render/capture pair
+used in a level- or clipping-sensitive comparison (banded THD, null test). `scipy.io.wavfile.write`
+with a `float32` buffer round-trips uncalibrated through this whole path with no extra flags needed.
 
 ---
 

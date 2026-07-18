@@ -30,6 +30,25 @@ keep those current and the agents stay useful with no extra setup.
 @.claude/rules/ui.md
 @.claude/rules/build.md
 
+## Delegation & model tiering
+
+Plan with a high-end model, delegate execution down to cheaper ones — reserve the expensive
+reasoning for the step that's actually hard to get right. As of July 2026 that means:
+
+- **Planning** (build-sequence ordering, schematic-topology judgement calls, deciding what a
+  session should tackle next) — a top-tier model at high effort (e.g. **Fable 5**, high effort).
+- **Important thinking work** (circuit/DSP correctness: the `schematic-checker` and
+  `dsp-validator` agents, anything cross-checking values/topology/taper against `circuit.md` or
+  `dsp.md`) — a strong reasoning model at high effort (e.g. **Opus 4.8**, high effort). Both
+  agents' frontmatter (`.claude/agents/schematic-checker.md`, `.claude/agents/dsp-validator.md`)
+  are pinned to this tier — don't downgrade them to save cost, they're exactly the "important"
+  category this policy protects.
+- **Routine work** (mechanical edits, boilerplate scaffolding, formatting, running builds/tests)
+  — a fast mid-tier model at medium effort (e.g. **Sonnet 5**, medium effort).
+
+Re-evaluate the concrete model names as new ones ship; the tiering principle (plan high, validate
+high, execute routine work cheap) is what should persist.
+
 ## Essential reading (template learnings — do not skip)
 
 - **`docs/calibration-and-gain-staging.md`** — input-load (`kInputRef`) calibration, output-makeup

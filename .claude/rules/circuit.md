@@ -14,6 +14,19 @@ List every image in `schematics/` and its role (which is authoritative for what)
 | `<switch_ref>.jpg` | Authoritative for switch/diode network |
 | `<older>.png` | Cross-reference only — values may differ |
 
+### Crop index (for fast lookup — fill in as you crop)
+
+When you crop sections out of a schematic image for closer reading, record what each crop actually
+contains so a later question ("where's the tone stack drawn?") is a table lookup, not a re-scan of
+the full image:
+
+| Crop file | Source image | Contains |
+|-----------|--------------|----------|
+| `<e.g. crop_input.png>` | `<primary>.png` | `<e.g. input jack -> bias network -> stage 1 input>` |
+| `<crop_clip.png>` | `<primary>.png` | `<e.g. clipping diode network + drive pot feedback leg>` |
+| `<crop_tone.png>` | `<primary>.png` | `<e.g. tone stack + recovery stage>` |
+| `<crop_switch.png>` | `<switch_ref>.jpg` | `<e.g. mode switch + diode selection network>` |
+
 ---
 
 ## ⚠ Schematic-reading gotchas (these caused real bugs)
@@ -46,6 +59,23 @@ List every image in `schematics/` and its role (which is authoritative for what)
   stage the input actually reaches first. Getting this backwards still produces a plausible-sounding
   result (both stages are real circuits, so it "works"), which is exactly why it's easy to ship
   before catching it — confirm the order explicitly, early, rather than inferring it.
+- **Once you have a component's value, re-reading it again rarely finds a new bug — re-tracing its
+  connections often does.** If a stage's R/C/pot values are already captured in the component
+  tables below, don't keep re-scanning the schematic image for those values on follow-up passes;
+  spend that time on the **node graph** instead (see "Topology — node graphs" below). Most of the
+  bugs this template has caught in practice were topology mistakes (a bridging part misread as
+  series/parallel, a wiper wired to the wrong leg) with perfectly correctly-read values, not
+  misread values themselves.
+- **A bridging (feedback-spanning) or shunt component changes the topology, not just a value.** A
+  resistor or capacitor that bridges across another part — from one side of an R to the other, or
+  from a mid-node to ground in parallel with something already there — turns what looks like a
+  simple series chain into a real feedback or divider network. Before modelling any such part,
+  redraw the two (or more) nodes it actually touches and confirm whether it's genuinely in
+  **series** (same current, no other path), **parallel** (same two nodes as another part), or a
+  **shunt to ground/VREF** (a third path off an existing node) — these have very different WDF
+  adaptor shapes (`WDFSeriesT`/`WDFParallelT` vs an R-type feedback leg) and are easy to conflate
+  when the schematic draws the bridging part as a short diagonal line across an otherwise-straight
+  trace.
 
 ---
 
@@ -79,6 +109,35 @@ Describe each stage's connections at the node level (use these directly to build
 Mark each stage **Linear** or **Nonlinear**, and which adaptor type it needs (series/parallel tree
 vs R-type for feedback). For switched sub-circuits, list each position as a distinct topology →
 precomputed scattering matrix.
+
+**This is the section worth the most re-checking effort.** If the component list (values, refs)
+for a stage is already filled in above, don't spend more analysis time re-confirming those values —
+put it into the node graph instead: for every named node in the stage, list every part terminal
+that lands on it. A minimal per-node entry looks like:
+
+```
+Node <name> (e.g. "op-amp (-) input"):
+  <R1> leg 2, <C3> leg 1, <pot P1> wiper — no other connection
+```
+
+Pay special attention to two node-reading mistakes that are easy to make from a schematic image and
+hard to catch later without a redraw:
+
+- **Pot wiper wiring.** For every pot, state explicitly which node each of the three terminals
+  (lug 1, lug 3, wiper) connects to, and whether the wiper feeds a **divider** (both end lugs
+  connected, wiper taps between them) or a **rheostat** (one end lug jumpered to the wiper or left
+  open, so only a variable series/shunt resistance is in play). These two wirings produce very
+  different transfer functions from the same pot value, and the schematic symbol looks almost
+  identical for both — trace the actual lug connections, don't infer from context.
+- **Bridging capacitors/resistors.** Any part that connects two nodes that aren't simply "next in
+  the chain" (e.g. a small cap from an op-amp output back to its own (−) input, or a resistor from
+  a tone pot wiper to a node in a different stage) changes the topology at both ends it touches —
+  it usually means an R-type feedback adaptor is needed rather than a plain series/parallel tree.
+  List these explicitly with BOTH nodes they touch, not just "near <stage>".
+
+For switched sub-circuits, apply the same node-level treatment to each position independently
+before precomputing its scattering matrix — a position that looks like a value swap can actually
+reroute a bridging part to a different node.
 
 ## Op-amp model
 

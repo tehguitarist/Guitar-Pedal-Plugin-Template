@@ -20,7 +20,8 @@ PedalAudioProcessor : AudioProcessor
   std::atomic<float>* cached param pointers (avoid string lookups on audio thread)
   std::atomic<float> inputLevelL/R, outputLevelL/R
   std::atomic<bool>  bypassed
-  static constexpr float kInputRef     // volts per full-scale (calibration doc §1)
+  static constexpr float kInputRef     = 0.87f; // volts per full-scale — template starting point;
+                                                 // measure YOUR rig and replace (calibration doc §1)
   static constexpr float kOutputMakeup // ~0.9 (calibration doc §2)
 ```
 
@@ -56,6 +57,7 @@ taper in DSP (keeps host automation linear and the taper in one place):
 | pot controls (`gain`, `tone`, `volume`, …) | `AudioParameterFloat` 0..1 | taper applied in DSP |
 | mode switch | `AudioParameterChoice` | precomputed topologies |
 | `input_trim` / `output_trim` | `AudioParameterFloat` dB | distinct from pedal controls |
+| `trim_link` | `AudioParameterBool` default false | see "Input/output trim link" below |
 | `oversampling` | `AudioParameterChoice` 1×/2×/4×/8× | realtime factor |
 | `render_oversampling` | `AudioParameterChoice` | offline-bounce factor (see below) |
 | `bypass` | `AudioParameterBool` | APVTS supports bool via this type |
@@ -92,6 +94,39 @@ const int wantFactor = isNonRealtime()
 - True bypass: dry input routed to output, DSP skipped when bypassed.
 - ~5 ms crossfade (`SmoothedValue bypassMix`) on transitions to avoid clicks.
 - On DAW recall, the UI must reflect the restored `bypass` parameter — read APVTS, not a stale flag.
+
+## Input/output trim link
+
+`trim_link` (bottom-bar "Trim Link" button, see `ui.md`) lets a player raise input trim to push
+the circuit harder without the overall loudness jumping: while linked, nudging one trim by `Δ dB`
+nudges the *other* trim by `−Δ dB`, clamped to its own `[-12, +12]` range. This is a UI/parameter
+convenience only — it does not change `processBlock`'s gain-staging math (input trim still scales
+`wet` pre-`kInputRef`, output trim still folds into `outputGain` exactly as before); it just keeps
+the two APVTS values moving in opposite lockstep.
+
+Implement it as a listener pair with a re-entrancy guard, not by computing one from the other in
+`processBlock` (that would fight the host's own automation/recall of both parameters):
+
+```cpp
+void parameterChanged(const String& id, float newValue) override
+{
+    if (isSyncingTrim || ! trimLinkParam->load()) return;
+    if (id != "input_trim" && id != "output_trim") return;
+
+    const float delta = newValue - lastTrimValue[id];
+    lastTrimValue[id] = newValue;
+    const auto* other = (id == "input_trim") ? outputTrimParam : inputTrimParam;
+
+    isSyncingTrim = true;
+    other->setValueNotifyingHost(other->convertTo0to1(
+        jlimit(-12.0f, 12.0f, other->get() - delta)));
+    isSyncingTrim = false;
+}
+```
+
+Clamping at the compensating side's range edge means the two trims can drift out of exact mirror
+symmetry at the extremes — that's expected (a real compensating pair does the same once one side
+hits its stop), not a bug to chase.
 
 ## prepareToPlay responsibilities
 

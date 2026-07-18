@@ -41,11 +41,25 @@ Each panel is identical in structure. The widths are your choice to suit the ped
 **Top-to-bottom within each panel:**
 
 1. **Section label** — "INPUT" / "OUTPUT". 8 pt, bold, letter-spacing ~0.20, colour `cTrimLabel`. Centred.
-2. **Halo trim knob** — 70×70 px at 1× scale. Rotary slider, `componentID = "trim"`. LookAndFeel draws it as: outer arc track (270° sweep, 5 px wide, `cTrimArcTrack`) + value arc (`cTrimArc`) + 36 px diameter cap with radial gradient (`cKnobHighlight` → `cKnobMid` → `cKnobShadow`) + 2.5 px indicator line (`cKnobIndicator`). Range −12 dB to +12 dB, default 0.
+2. **Halo trim knob** — 70×70 px at 1× scale. Rotary slider, `componentID = "trim"`. LookAndFeel draws it as: outer arc track (270° sweep, 5 px wide, `cTrimArcTrack`) + value arc (`cTrimArc`) + 36 px diameter cap with radial gradient (`cKnobHighlight` → `cKnobMid` → `cKnobShadow`) + 2.5 px indicator line (`cKnobIndicator`). Range −12 dB to +12 dB, default 0. `setTextBoxStyle(NoTextBox, ...)` — the value readout is the tooltip + value label below, not JUCE's built-in text box.
 3. **"TRIM" sub-label** — 7.5 pt, bold, `cTrimLabel` dimmed slightly. Centred below knob.
-4. **VU bar** — fills all remaining height. See VU spec below.
+4. **Trim value label** — 7 pt, bold, `cTrimLabel`, centred directly below the "TRIM" sub-label. Text is the current value to **two decimal places with an explicit sign and unit**, e.g. `"+3.00 dB"` / `"-12.00 dB"` / `"+0.00 dB"`. Update it in the same `onValueChange` callback that updates the knob's tooltip (see `ui.md` "Tooltips"):
+   ```cpp
+   auto fmt = [](float db) { return (db >= 0 ? "+" : "") + juce::String(db, 2) + " dB"; };
+   inputTrim.onValueChange = [this, fmt] {
+       const auto txt = fmt((float) inputTrim.getValue());
+       inputTrim.setTooltip(txt);
+       inputTrimValueLabel.setText(txt, juce::dontSendNotification);
+   };
+   ```
+5. **VU bar** — fills all remaining height. See VU spec below.
 
 APVTS parameter IDs: `"input_trim"` and `"output_trim"` (`AudioParameterFloat`, −12 to +12 dB).
+
+**Containment:** lay out this panel's elements against the panel's own `Rectangle<int>` column
+(the one `resized()` allocated for INPUT or OUTPUT), never against the full editor bounds — so the
+halo trim knob and the VU bar can never be positioned or sized past that column's left/right edges,
+at any scale factor. See `ui.md`'s Layout contract for the min/max-scale verification requirement.
 
 ---
 
@@ -83,14 +97,15 @@ A full-width panel sits **below the pedal face** with a small gap (≈10 px at 1
 **Layout left-to-right:**
 
 ```
-[OS] [8px] [LIVE][5px][live▾] [12px] [RENDER][5px][render▾]  ···flex···  [UI SIZE][5px][137%▾]
+[OS] [8px] [LIVE][5px][live▾] [12px] [RENDER][5px][render▾] [12px] [HQ?] [8px] [TRIM LINK]  ···flex···  [UI SIZE][5px][137%▾]
 ```
 
 - "OS" label: 8 pt bold, `cOSLabel`, ~20 px wide.
 - "LIVE" / "RENDER" labels: 7 pt bold, `cOSLabel`, right-aligned. Allocate ~26 px for LIVE, ~40 px for RENDER (longer word needs more room to avoid truncation).
 - Two `juce::ComboBox` dropdowns, each ~36 px wide. Items: `"1x"`, `"2x"`, `"4x"`, `"8x"` (IDs 1–4).
+- **Trim Link button** (see `ui.md` "Trims"): ~62 px wide, `TextButton`, `componentID == "os"` (reuses the segmented-button lit-on/dim-off style — see `drawButtonBackground`'s `"os"` branch below), label `"TRIM LINK"` at the same 8 pt bold used for `drawButtonText`. Bound to the `trim_link` APVTS bool via `ButtonParameterAttachment`. If an HQ toggle is present, Trim Link sits immediately after it; otherwise it sits immediately after the RENDER box.
 - "UI SIZE" label: 7 pt bold, `cOSLabel`, ~42 px, right-aligned.
-- Scale button: 48 px wide, shows current scale as `"100%"` etc. Clicking opens a popup menu.
+- Scale button: 48 px wide, shows current scale as `"100%"` etc. Clicking opens a popup menu. **Must look identical to the LIVE/RENDER combo boxes** — same background/border colours, corner radius, chevron, and font (see "Selector-box style parity" below) — not a separate `TextButton` look.
 
 **ComboBox styling** (LookAndFeel overrides):
 
@@ -145,6 +160,18 @@ setColour(PopupMenu::textColourId,                        Colour(cOSBtnActive));
 setColour(PopupMenu::highlightedBackgroundColourId,       Colour(cOSBtnActiveBg));
 setColour(PopupMenu::highlightedTextColourId,             Colour(0xFFF5F5F5u));
 ```
+
+### Selector-box style parity (scale button = combo boxes, visually)
+
+The UI-scale button opens a `PopupMenu` rather than a `ComboBox` (see Resizable UI below), so it's
+a `TextButton`, not a `ComboBox` — but it must be **visually indistinguishable in style** from the
+LIVE/RENDER combo boxes: same rounded-rect fill/border colours, same 4 px corner radius, same
+trailing chevron, same font. Don't let it fall back to `PedalLookAndFeel`'s generic button look.
+Give it `componentID == "os-selector"` and branch `drawButtonBackground` to paint it exactly like
+`drawComboBox` above (fill + border + chevron, using the button's `getToggleState()`/mouse-down in
+place of `isButtonDown`), and set its font via `setFont(getComboBoxFont(...))`-equivalent sizing
+(`jmax(7.0f, height * 0.38f)`, bold) rather than the `drawButtonText` 8 pt used for OS/HQ/Trim Link
+toggles — the scale button is a *selector*, styled with the combo-box family, not a *toggle*.
 
 ### Version stamp (self-updating, no manual edits)
 
@@ -250,13 +277,34 @@ void refreshFonts(float sc)
 }
 ```
 
-**Persistence — two layers:**
+**Persistence — two layers, BOTH driven from `resized()` itself so a plain corner-drag is
+remembered exactly like a scale-menu pick, not just the menu path:**
 
-- *Per-session* (survives DAW preset recall): write to APVTS state in `resized()`:
+- *Per-session* (survives DAW preset recall): write to APVTS state unconditionally at the top of
+  `resized()`, every call — this already covers drag-resize, since dragging the corner calls
+  `resized()` just like `setSize()` from the menu does:
   ```cpp
   apvts.state.setProperty("uiScale", (double)currentScale, nullptr);
   ```
-- *Cross-session default*: `juce::ApplicationProperties` / `PropertiesFile` (key `"defaultScale"`). Load on editor construction; save when user picks "Set current scale as default" from the scale menu.
+- *Cross-session default*: `juce::ApplicationProperties` / `PropertiesFile` (key `"defaultScale"`).
+  Load on editor construction. Don't gate the save on the explicit "Set current scale as default"
+  menu action alone — that leaves a plain drag-resize forgotten on next open. Instead debounce a
+  save off every `resized()` call with a short one-shot `Timer` restarted on each call, so rapid
+  drag-resize frames coalesce into a single disk write ~500 ms after the user lets go:
+  ```cpp
+  // In resized(), after the per-session apvts write above:
+  scaleSaveDebounce.startTimer(500);   // Timer subclass; timerCallback() does the save + stopTimer()
+
+  // timerCallback():
+  void timerCallback() override
+  {
+      appProps.getUserSettings()->setValue("defaultScale", (double)currentScale);
+      stopTimer();
+  }
+  ```
+  Keep the explicit "Set current scale as default" menu item too (it can just call the same save
+  function immediately, no debounce) — useful when the user wants to confirm a popup-picked preset
+  is saved right away rather than waiting on the timer.
 
 **Scale popup menu** attached to the `"137%"` button:
 

@@ -58,6 +58,11 @@ outputGain = kOutputMakeup * volumeGain * dbToGain(outTrim) / kInputRef;
 Keep the **input meter** and the **bypass dry copy** in DAW domain (do NOT scale them by `K`),
 so metering and true-bypass passthrough stay honest.
 
+> **Template default:** the scaffold in `architecture.md` ships `kInputRef = 0.87f` as a starting
+> point so the plugin does something reasonable before you've measured anything. It is not a
+> measurement for any particular pedal — replace it with **your** rig's `K` from the procedure
+> above (§8 checklist, first item) before treating drive response as calibrated.
+
 ---
 
 ## 2. Output makeup: CALIBRATE it to the captures — not to a headroom target

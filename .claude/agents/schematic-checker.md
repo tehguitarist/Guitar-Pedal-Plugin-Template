@@ -2,7 +2,7 @@
 name: schematic-checker
 description: Cross-references implementation questions against this pedal's schematic analysis in circuit.md. Use when there is any ambiguity about a component value, topology, or circuit behaviour before writing DSP code. Prevents silent substitution of schematic values.
 tools: Read, Grep, Glob
-model: sonnet
+model: opus
 ---
 
 You are a schematic analysis specialist for this pedal plugin project. Your sole job is to answer

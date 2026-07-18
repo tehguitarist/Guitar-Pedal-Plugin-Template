@@ -23,6 +23,15 @@ T = G.segment_times()   # {segment_name: (t0, t1)} — single source of truth (n
 def load(path):
     sr, x = wavfile.read(path)
     if x.dtype.kind in "iu":
+        # Integer PCM can't represent samples past its own full-scale: a plugin render that
+        # legitimately exceeds 0 dBFS at high drive+volume (see calibration-and-gain-staging.md
+        # §2 — this is faithful, not a bug) gets hard-clipped/wrapped by an integer WAV writer
+        # with no error and no warning in the file itself. That silently corrupts exactly the
+        # high-drive captures where THD/harmonic-balance accuracy matters most. OfflineRender and
+        # any capture used for a level- or clipping-sensitive comparison should be 32-bit float.
+        print(f"WARNING: {path} is integer PCM ({x.dtype}) — output >0 dBFS would have been "
+              f"clipped by this format. Use 32-bit float WAV for renders/captures "
+              f"(see validation-and-capture.md).")
         x = x.astype(np.float64) / np.iinfo(x.dtype).max
     else:
         x = x.astype(np.float64)
@@ -66,6 +75,21 @@ def rms_db(x):
     return 20 * np.log10(np.sqrt(np.mean(x ** 2)) + 1e-12)
 
 
+def normalize_gain(test, ref):
+    """Optimal-gain-match `test` onto `ref` (least-squares scalar) and return (test_scaled,
+    gain_db). Run this before comparing SHAPE (transfer()/banded_thd()/harmonic placement) so a
+    pure level offset between plugin render and capture doesn't masquerade as a tonal or
+    distortion-amount difference. Always inspect gain_db too, though — a per-capture wobble is
+    ordinary capture-gain noise, but the SAME offset showing up consistently across many captures
+    is a real input/output calibration gap (see validation-and-capture.md §4 and
+    calibration-and-gain-staging.md §2) and should be traced back to the source, not silently
+    absorbed capture-by-capture. Same gain-match math as null_depth() uses internally, exposed
+    separately here so shape comparisons can normalize without going through the null path."""
+    n = min(len(test), len(ref))
+    g = float(np.dot(ref[:n], test[:n]) / (np.dot(test[:n], test[:n]) + 1e-30))
+    return test * g, 20 * np.log10(abs(g) + 1e-20)
+
+
 def transfer(out, inp):
     f, Pxy = sps.csd(inp, out, FS, nperseg=8192)
     f, Pxx = sps.welch(inp, FS, nperseg=8192)
@@ -81,6 +105,38 @@ def fractional_octave_freqs(f_lo=20.0, f_hi=20000.0, frac=3):
     import math
     n = int(math.floor(frac * math.log2(f_hi / f_lo)))
     return [f_lo * 2.0 ** (i / frac) for i in range(n + 1)]
+
+
+# Standard 31-band 1/3-octave graphic-EQ center frequencies, 20 Hz - 20 kHz (ISO 266 preferred
+# numbers) — the fixed grid for BOTH the full-range frequency response and the THD-by-band
+# analysis below, so the two line up at identical frequencies rather than being independently
+# binned. THD only reports the subset of this grid inside its own 100 Hz-12 kHz range (see
+# banded_thd()) — it does not define its own band edges.
+THIRD_OCTAVE_31_CENTERS = (
+    20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800,
+    1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000,
+)
+
+
+def third_octave_bands(centers=THIRD_OCTAVE_31_CENTERS):
+    """(lo, center, hi) triples for `centers` — edges are the geometric mean with each neighbour
+    (a symmetric 2**(1/6) half-band split at the first/last centre, which have no neighbour on
+    one side)."""
+    centers = list(centers)
+    edge = 2.0 ** (1.0 / 6.0)   # half a 1/3-octave, for the outer edges of the end bands
+    bands = []
+    for i, fc in enumerate(centers):
+        lo = (centers[i - 1] * fc) ** 0.5 if i > 0 else fc / edge
+        hi = (fc * centers[i + 1]) ** 0.5 if i < len(centers) - 1 else fc * edge
+        bands.append((lo, fc, hi))
+    return bands
+
+
+def band_response(f, mag, centers=THIRD_OCTAVE_31_CENTERS):
+    """Sample a continuous FR curve (from transfer()) at the standard 31-band centers. Returns
+    {center_hz: gain_dB} — the per-band FR readout that pairs with banded_thd()'s per-band THD on
+    the same grid, so a report can show FR and THD side-by-side at identical frequencies."""
+    return {fc: float(gain_at(f, mag, fc)) for fc in centers}
 
 
 # --- THD: discrete tone + continuous Farina swept-sine ----------------------------------------
@@ -129,6 +185,37 @@ def harmonic_thd_curve(capture_sweep, ref_sweep, max_order=7):
         harm = np.sqrt(sum(Hn[N] ** 2 for N in range(2, max_order + 1)))
         thd_pct = 100.0 * harm / (H1 + 1e-20)
     return fr, thd_pct, Hn
+
+
+def banded_thd(fr, thd_pct, Hn, f_lo=100.0, f_hi=12000.0, centers=THIRD_OCTAVE_31_CENTERS, max_order=7):
+    """Bucket harmonic_thd_curve()'s continuous THD(f) + per-harmonic magnitudes onto the standard
+    31-band grid (`third_octave_bands()`/`band_response()` above), reporting only the bands whose
+    CENTER falls in [f_lo, f_hi] (default 100 Hz-12 kHz) — a THD-focused SUBSET of the full-range
+    FR grid, not a separately-binned range, so THD bands line up exactly with the FR bands at the
+    same frequencies. A single aggregate THD% (or the raw continuous curve) can hide two very
+    different-sounding circuits that happen to land on the same number — this reports, per band,
+    the THD% AND each harmonic order's amplitude relative to the fundamental (dB), so you can see
+    WHERE distortion concentrates and WHICH orders dominate at each frequency, not just how much
+    there is in aggregate. Returns a list of dicts:
+      {center, f_lo, f_hi, thd_pct, harmonics: {order: dB_below_fundamental}}
+    A band with no swept-sweep energy in range gets thd_pct=None and an empty harmonics dict
+    rather than a misleading zero."""
+    out = []
+    for lo, fc, hi in third_octave_bands(centers):
+        if fc < f_lo or fc > f_hi:
+            continue
+        mask = (fr >= lo) & (fr < hi)
+        if not np.any(mask):
+            out.append({"center": fc, "f_lo": lo, "f_hi": hi, "thd_pct": None, "harmonics": {}})
+            continue
+        band = {"center": fc, "f_lo": lo, "f_hi": hi,
+                 "thd_pct": float(np.nanmean(thd_pct[mask])), "harmonics": {}}
+        h1 = np.nanmean(Hn[1][mask]) + 1e-20
+        for N in range(2, max_order + 1):
+            hn = np.nanmean(Hn[N][mask])
+            band["harmonics"][N] = float(20 * np.log10(hn / h1 + 1e-20))
+        out.append(band)
+    return out
 
 
 # --- Sub-sample-aligned null test -------------------------------------------------------------
