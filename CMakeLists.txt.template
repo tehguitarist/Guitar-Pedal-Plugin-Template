@@ -21,6 +21,22 @@ add_subdirectory(libs/JUCE)
 add_subdirectory(libs/xsimd)          # optional; remove if not used
 add_subdirectory(libs/chowdsp_wdf)
 
+# Embed the UI art (processed from ui/ into assets/ui/ by tools/process_ui_assets.sh). The
+# accessors in src/ui/Assets.h expect exactly these names; keep the two in sync when reskinning.
+juce_add_binary_data(PedalAssets
+    SOURCES
+        assets/ui/knob.png
+        assets/ui/trim_knob.png
+        assets/ui/led_on.png
+        assets/ui/led_off.png
+        assets/ui/footswitch_up.png
+        assets/ui/footswitch_down.png
+        assets/ui/switch_up.png
+        assets/ui/switch_mid.png
+        assets/ui/switch_down.png
+        assets/ui/texture.jpg
+)
+
 juce_add_plugin(<Pedal>
     COMPANY_NAME "<You>"
     BUNDLE_ID com.<you>.<pedal>
@@ -36,7 +52,11 @@ target_sources(<Pedal>
         src/PluginProcessor.cpp
         src/PluginEditor.cpp
         src/ui/PedalLookAndFeel.cpp
+        src/ui/PedalFace.cpp
 )
+
+# So `#include "PluginProcessor.h"` / `"ui/PedalFace.h"` resolve without long relative paths.
+target_include_directories(<Pedal> PRIVATE src)
 
 target_compile_definitions(<Pedal>
     PUBLIC
@@ -50,6 +70,7 @@ target_link_libraries(<Pedal>
         juce::juce_audio_utils
         juce::juce_dsp
         chowdsp::chowdsp_wdf
+        PedalAssets                    # embedded UI art (src/ui/Assets.h)
         xsimd                          # remove if not used
     PUBLIC
         juce::juce_recommended_config_flags
@@ -76,3 +97,17 @@ target_compile_options(<Pedal> PRIVATE ${PEDAL_WARNING_FLAGS})
 #
 # An OfflineRender console app (mirrors processBlock) powers the analysis/ A/B harness — add it the
 # same way as a JUCE console app, sourced from analysis/offline_render.cpp.
+#
+# UISnapshot — headless editor render to PNG (build.md "UI changes"). Needs juce_gui_extra +
+# PedalAssets and the shared UI/processor sources; it's a smoke test (asserts a non-empty image),
+# so add_test() with no CPU/pixel gate. Uncomment once you have src/PluginProcessor.{h,cpp}:
+#   juce_add_console_app(UISnapshot PRODUCT_NAME "UISnapshot")
+#   target_sources(UISnapshot PRIVATE
+#       tests/UISnapshot.cpp src/PluginProcessor.cpp src/PluginEditor.cpp
+#       src/ui/PedalLookAndFeel.cpp src/ui/PedalFace.cpp)
+#   target_include_directories(UISnapshot PRIVATE src)
+#   target_compile_definitions(UISnapshot PRIVATE
+#       JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1 JucePlugin_VersionString="${PROJECT_VERSION}")
+#   target_link_libraries(UISnapshot PRIVATE juce::juce_gui_extra juce::juce_audio_utils juce::juce_dsp
+#       chowdsp::chowdsp_wdf PedalAssets juce::juce_recommended_config_flags)
+#   add_test(NAME UISnapshot COMMAND UISnapshot)

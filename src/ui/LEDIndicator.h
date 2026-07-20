@@ -1,8 +1,10 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "Assets.h"
 #include "PedalLookAndFeel.h"
 
-// Small circular LED — green when on (pedal active), very dark when off (bypassed).
+// Small status LED — on = pedal active, off = bypassed. Prefers the embedded bezel art
+// (led_on/led_off, glow baked in) and falls back to a procedural green glow when no art is present.
 class LEDIndicator : public juce::Component
 {
 public:
@@ -18,6 +20,17 @@ public:
     void paint(juce::Graphics& g) override
     {
         const auto b  = getLocalBounds().toFloat();
+
+        // Image path (glow baked into the bezel art).
+        const juce::Image img = isOn ? PedalAssets::ledOn() : PedalAssets::ledOff();
+        if (img.isValid())
+        {
+            const float d = juce::jmin(b.getWidth(), b.getHeight());
+            g.drawImage(img, juce::Rectangle<float>(b.getCentreX() - d * 0.5f, b.getCentreY() - d * 0.5f, d, d),
+                        juce::RectanglePlacement::centred, false);
+            return;
+        }
+
         const float r = juce::jmin(b.getWidth(), b.getHeight()) * 0.5f - 0.5f;
         const float cx = b.getCentreX(), cy = b.getCentreY();
 

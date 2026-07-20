@@ -2,6 +2,31 @@
 
 This plugin uses JUCE 8+ with a custom `LookAndFeel_V4` subclass. The centre pedal face is unique to each pedal, but the following peripheral elements (side panels, trim knobs, VU meters, switch, LED, footswitch, oversampling strip) are shared across builds and should match this spec exactly. Implement each section as described.
 
+Working sample code for all of this already ships in the template: `src/PluginEditor.{h,cpp}`
+(the whole shell — side panels, OS/scale strip, scaling, version stamp, tooltips) and
+`src/ui/PedalFace.{h,cpp}` (the per-pedal centre). Read those first; the sections below are the
+"why" behind that code.
+
+---
+
+## Rendering: image-first with a vector fallback
+
+Every drawn element (knobs, trim cap, footswitch, LED, mode switch, pedal-face texture) tries an
+**embedded image first** and falls back to the **procedural (vector) drawing** in this spec when the
+image is absent. So the template works out-of-the-box with placeholder art *and* renders sensibly
+with no art at all — pick whichever the pedal wants.
+
+- Art lives in `ui/` (originals) → `tools/process_ui_assets.sh` resizes/compresses into `assets/ui/`
+  → `juce_add_binary_data(PedalAssets ...)` embeds it → `src/ui/Assets.h` exposes cached
+  `juce::Image` accessors (with an optional `adjustBrightnessContrast` grade to match the palette).
+- Expected names: `knob`, `trim_knob`, `led_on/off`, `footswitch_up/down`, `switch_up/mid/down`,
+  `texture`. Reskin = replace the source PNGs, keep the names (or rename in the script, the
+  `juce_add_binary_data` list, and `Assets.h` together), re-run the script, rebuild.
+- Knob art is drawn at "noon" and rotated to the value in `drawRotarySlider` — see `ui/ui-replacements.md`
+  for the art rules (alpha, rotation-safe, don't stretch, 2× resolution).
+- To ship the **pure-vector** look instead, just don't embed images (or delete them) — the fallbacks
+  below take over. Any TU including `Assets.h` must link the `PedalAssets` target.
+
 ---
 
 ## Colour Palette

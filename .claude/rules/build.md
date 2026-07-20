@@ -77,7 +77,9 @@ remove/re-add the plugin.
   `juce::Image`, and writes a PNG lets you verify layout/colour/scale changes (including at
   different UI-scale factors) with no DAW and no physical display attached — useful in CI or over
   SSH. Cheap to add (`juce_add_console_app`) and catches layout regressions a build-success check
-  alone won't.
+  alone won't. Such an exe must link `PedalAssets` (the UI headers pull in `Assets.h`/`BinaryData.h`)
+  and compile `src/ui/PedalLookAndFeel.cpp` + `src/ui/PedalFace.cpp` + `src/PluginEditor.cpp`;
+  render at the min (0.5×) and max (2.5×) scale, not just 100% (see `ui.md` Layout contract).
 
 ### Performance & fidelity probes (CPU/quality optimisation pass)
 

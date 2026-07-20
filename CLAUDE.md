@@ -62,7 +62,23 @@ high, execute routine work cheap) is what should persist.
 - **`analysis/`** — the reusable harness: `gen_test_signal.py` (comprehensive A/B signal) +
   `analyze.py` (load/align, FR, THD, Farina swept-THD, sub-sample null, filename parser).
 - **`docs/ui-peripheral-spec.md`** — full visual spec for the reusable UI elements.
-- **`src/ui/`** — drop-in `PedalLookAndFeel`, `VUMeter`, `ThreePositionSwitch`, `LEDIndicator`.
+- **`src/PluginEditor.{h,cpp}`** — working sample editor: three-column layout, side-panel trims +
+  VU + 2-dp value readouts, oversampling/scale strip (LIVE/RENDER, HQ + Trim Link toggles,
+  self-updating version stamp), full resizable-UI scaling with per-session + debounced
+  cross-session persistence, TooltipWindow. Binds to the canonical APVTS IDs.
+- **`src/PluginProcessor.{h,cpp}`** — a PLACEHOLDER pass-through processor: it declares the full
+  canonical APVTS layout the UI binds to and exposes the input/output peak meters, but does NO
+  circuit modelling. It exists so the UI compiles/loads/renders today (verified: builds clean, the
+  headless `tests/UISnapshot.cpp` renders it at 0.5×/1×/2.5×). Replace its guts during the DSP build
+  sequence, keeping the parameter IDs stable.
+- **`src/ui/PedalFace.{h,cpp}`** — sample single-channel centre face (GAIN/TONE/VOLUME knobs with
+  2-dp tooltips, a param-bound 3-position mode switch, LED, bypass footswitch, logo). This is the
+  one per-pedal piece — rename labels/IDs and re-arrange `resized()`. Dual-stage pedals instantiate
+  it per stage (architecture.md).
+- **`src/ui/`** — drop-in `PedalLookAndFeel`, `VUMeter`, `ThreePositionSwitch`, `LEDIndicator`,
+  each **image-first with a procedural (vector) fallback**. Art is embedded via `Assets.h` +
+  `juce_add_binary_data(PedalAssets ...)`; reskin by replacing the source PNGs in `ui/` and running
+  `tools/process_ui_assets.sh` (→ `assets/ui/`). Remove the images to fall back to the vector look.
 - **`src/utils/TaperUtils.h`** — taper helpers (note `audioTaperR0` for large gain pots).
 
 ## Build sequence (validate each step before the next — do not skip ahead)

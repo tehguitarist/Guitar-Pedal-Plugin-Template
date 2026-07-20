@@ -1,5 +1,42 @@
 #include "PedalLookAndFeel.h"
 
+#include "Assets.h"
+
+#include <cmath>
+
+// Draw a noon-centred knob image rotated to the slider position. Returns false (draw nothing) when
+// the image is invalid so the caller can fall back to the vector knob.
+bool PedalLookAndFeel::drawKnobImage(juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> bounds,
+                                     float sliderPos, float startAngle, float endAngle)
+{
+    if (! img.isValid())
+        return false;
+
+    const float d = juce::jmin(bounds.getWidth(), bounds.getHeight());
+    const float toAngle   = startAngle + sliderPos * (endAngle - startAngle);
+    const float noonAngle = 0.5f * (startAngle + endAngle); // art is drawn at "noon"
+    const juce::Rectangle<float> dest(bounds.getCentreX() - d * 0.5f, bounds.getCentreY() - d * 0.5f, d, d);
+
+    juce::Graphics::ScopedSaveState save(g);
+    g.addTransform(juce::AffineTransform::rotation(toAngle - noonAngle, bounds.getCentreX(), bounds.getCentreY()));
+    g.drawImage(img, dest, juce::RectanglePlacement::centred, false);
+    return true;
+}
+
+// Draw the footswitch art (up = released, down = momentary press). isDown is the mouse-down press
+// state, NOT the bypass toggle — the switch art doesn't indicate bypass (the LED does).
+bool PedalLookAndFeel::drawBypassImage(juce::Graphics& g, juce::Rectangle<float> b, bool isDown)
+{
+    const juce::Image img = isDown ? PedalAssets::footswitchDown() : PedalAssets::footswitchUp();
+    if (! img.isValid())
+        return false;
+
+    const float d = juce::jmin(b.getWidth(), b.getHeight());
+    const juce::Rectangle<float> dest(b.getCentreX() - d * 0.5f, b.getCentreY() - d * 0.5f, d, d);
+    g.drawImage(img, dest, juce::RectanglePlacement::centred, false);
+    return true;
+}
+
 PedalLookAndFeel::PedalLookAndFeel()
 {
     setColour(juce::Label::textColourId, juce::Colour(cLabelText));
@@ -27,6 +64,25 @@ void PedalLookAndFeel::paintPedalBackground(juce::Graphics& g, juce::Rectangle<i
     // Rounded base fill
     g.setColour(juce::Colour(cPedalFace));
     g.fillRoundedRectangle(fb, 16.0f);
+
+    // Image path: cover/crop-fill the pedal-face texture, clipped to the rounded body. Falls
+    // through to the procedural mottled background below when no texture is embedded.
+    const juce::Image& tex = PedalAssets::textureGraded();
+    if (tex.isValid())
+    {
+        juce::Path body;
+        body.addRoundedRectangle(fb.reduced(2.0f), 14.0f);
+        g.saveState();
+        g.reduceClipRegion(body);
+        const float s = juce::jmax(W / (float) tex.getWidth(), H / (float) tex.getHeight());
+        const float dw = (float) tex.getWidth() * s, dh = (float) tex.getHeight() * s;
+        g.drawImage(tex, juce::Rectangle<float>(fb.getCentreX() - dw * 0.5f, fb.getCentreY() - dh * 0.5f, dw, dh),
+                    juce::RectanglePlacement::centred, false);
+        g.restoreState();
+        g.setColour(juce::Colour(cPedalBorder));
+        g.drawRoundedRectangle(fb.reduced(1.0f), 16.0f, 2.0f);
+        return;
+    }
 
     // Clip subsequent drawing to inside the rounded rect
     g.saveState();
@@ -123,6 +179,12 @@ void PedalLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int w, 
             g.strokePath(arc, juce::PathStrokeType(arcW, juce::PathStrokeType::curved,
                                                     juce::PathStrokeType::rounded));
         }
+        // Cap: image art (rotated) sized to the vector cap's footprint; else the vector cap below.
+        {
+            const auto capBounds = juce::Rectangle<float>(cx - knobR, cy - knobR, knobR * 2.0f, knobR * 2.0f);
+            if (drawKnobImage(g, PedalAssets::trimKnob(), capBounds, sliderPos, startAngle, endAngle))
+                return;
+        }
         // Knob cap with radial gradient
         {
             juce::ColourGradient grad(juce::Colour(cKnobHighlight),
@@ -149,6 +211,10 @@ void PedalLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int w, 
     }
     else
     {
+        // Image path: the graded knob art (rotated to value). Falls back to the vector knob below.
+        if (drawKnobImage(g, PedalAssets::knobGraded(), bounds, sliderPos, startAngle, endAngle))
+            return;
+
         // Standard pedal knob: gradient cap + indicator line
         const float knobR = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.5f - 2.0f;
 
@@ -188,6 +254,11 @@ void PedalLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& but
 
     if (button.getComponentID() == "bypass")
     {
+        // Image path: footswitch_up/down art (down = momentary press animation). Falls back to the
+        // procedural octagon + dome below when no art is embedded.
+        if (drawBypassImage(g, b, down))
+            return;
+
         // Octagonal footswitch nut + circular rubber dome inner button
         const float cx = b.getCentreX(), cy = b.getCentreY();
         const float nutR  = juce::jmin(b.getWidth(), b.getHeight()) * 0.5f - 1.0f; // octagon outer radius
@@ -297,11 +368,42 @@ void PedalLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& but
             g.drawRoundedRectangle(b.expanded(1.5f), corner + 1.5f, 1.5f);
         }
     }
+    else if (button.getComponentID() == "os-selector")
+    {
+        // UI-scale button: a TextButton (it opens a PopupMenu, not a ComboBox) but styled
+        // identically to the LIVE/RENDER combo boxes — same fill/border/corner/chevron — so the
+        // OS strip reads as one family. See docs/ui-peripheral-spec.md "Selector-box style parity".
+        const float corner = 4.0f;
+        g.setColour(down ? juce::Colour(cOSBtnActiveBdr).withAlpha(0.4f) : juce::Colour(cOSBtnActiveBg));
+        g.fillRoundedRectangle(b, corner);
+        g.setColour(juce::Colour(cOSBtnActiveBdr));
+        g.drawRoundedRectangle(b.reduced(0.5f), corner, 1.0f);
+
+        const float arrowCX = b.getRight() - 8.0f, arrowCY = b.getCentreY();
+        juce::Path arrow;
+        arrow.startNewSubPath(arrowCX - 2.5f, arrowCY - 1.5f);
+        arrow.lineTo(arrowCX,                 arrowCY + 1.5f);
+        arrow.lineTo(arrowCX + 2.5f,          arrowCY - 1.5f);
+        g.setColour(juce::Colour(cOSLabel));
+        g.strokePath(arrow, juce::PathStrokeType(1.2f, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+    }
 }
 
 void PedalLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& button,
                                        bool, bool down)
 {
+    if (button.getComponentID() == "os-selector")
+    {
+        // Selector, not a toggle: combo-box font + active colour, centred (chevron painted on top).
+        g.setColour(juce::Colour(cOSBtnActive));
+        g.setFont(juce::Font(juce::FontOptions(juce::jmax(7.0f, (float) button.getHeight() * 0.38f),
+                                               juce::Font::bold)));
+        g.drawText(button.getButtonText(), button.getLocalBounds(), juce::Justification::centred, false);
+        return;
+    }
+
+    // OS / HQ / Trim Link toggles: lit-on (cOSBtnActive) / dim-off (cOSLabel).
     const bool active = button.getToggleState();
     const juce::Colour col = active ? juce::Colour(cOSBtnActive) : juce::Colour(cOSLabel);
     g.setColour(col);

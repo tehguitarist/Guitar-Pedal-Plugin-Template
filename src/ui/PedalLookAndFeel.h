@@ -70,4 +70,11 @@ public:
     juce::Font getComboBoxFont(juce::ComboBox& box) override;
 
     void positionComboBoxText(juce::ComboBox& box, juce::Label& label) override;
+
+private:
+    // Image-first helpers (draw the embedded art rotated to sliderPos; caller falls back to the
+    // vector paths above when the image is missing). See src/ui/Assets.h.
+    static bool drawKnobImage(juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> bounds,
+                              float sliderPos, float startAngle, float endAngle);
+    static bool drawBypassImage(juce::Graphics& g, juce::Rectangle<float> bounds, bool isDown);
 };

@@ -1,11 +1,14 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "Assets.h"
 #include "PedalLookAndFeel.h"
 
 // Generic 3-position vertical toggle switch (top / middle / bottom).
-// The body is a narrow (20px) toggle bar centred in the component; labels sit 4px to its right.
+// Prefers the embedded switch art (switch_up/mid/down, one image per position) drawn in the body
+// column, and falls back to a procedural lever when no art is present. Labels sit to the right.
 // Both mouseDown and mouseDrag update position so the lever can be dragged.
 // Set the three labels via setLabels(); map onChange(pos) to your APVTS choice parameter.
+// (For a param-attached example — begin/endGesture, param → setPosition — see PedalFace.)
 class ThreePositionSwitch : public juce::Component
 {
 public:
@@ -41,36 +44,52 @@ public:
         const float bodyY  = (b.getHeight() - bodyH) * 0.5f;
         const float labelX = bodyX + kBodyW + kGap;
 
-        // Switch body
-        g.setColour(juce::Colour(0xFF0A1422u));
-        g.fillRoundedRectangle(bodyX, bodyY, kBodyW, bodyH, 4.0f * sc);
-        g.setColour(juce::Colour(0xFF1C3050u));
-        g.drawRoundedRectangle(bodyX + 0.5f, bodyY + 0.5f, kBodyW - 1.0f, bodyH - 1.0f, 4.0f * sc, 1.0f);
-
-        // Centre groove
-        const float grooveX = bodyX + kBodyW * 0.5f;
-        g.setColour(juce::Colour(0xFF060F1Au));
-        g.fillRect(grooveX - 1.5f * sc, bodyY + 5.0f * sc, 3.0f * sc, bodyH - 10.0f * sc);
-        g.setColour(juce::Colour(0xFF243550u));
-        g.drawLine(grooveX - 0.5f, bodyY + 5.0f * sc, grooveX - 0.5f, bodyY + bodyH - 5.0f * sc, 1.0f);
-
-        // Lever
         const float section = bodyH / 3.0f;
-        const float leverH  = 14.0f * sc;
-        const float leverW  = kBodyW - 4.0f * sc;
-        const float leverX  = bodyX + 2.0f * sc;
-        const float leverY  = bodyY + (float)position * section + (section - leverH) * 0.5f;
 
-        g.setColour(juce::Colours::black.withAlpha(0.35f));
-        g.fillRoundedRectangle(leverX + sc, leverY + 2.0f * sc, leverW, leverH, 3.0f * sc);
+        // Image path: one image per position, drawn in the body column. Falls back to the vector
+        // body + lever below when no switch art is embedded.
+        const juce::Image img = position == 0 ? PedalAssets::switchUp()
+                              : position == 1 ? PedalAssets::switchMid()
+                                              : PedalAssets::switchDown();
+        if (img.isValid())
+        {
+            const float d = juce::jmin(kBodyW * 1.6f, bodyH); // switch art is roughly square
+            g.drawImage(img, juce::Rectangle<float>(bodyX + kBodyW * 0.5f - d * 0.5f,
+                                                    bodyY + bodyH * 0.5f - d * 0.5f, d, d),
+                        juce::RectanglePlacement::centred, false);
+        }
+        else
+        {
+            // Switch body
+            g.setColour(juce::Colour(0xFF0A1422u));
+            g.fillRoundedRectangle(bodyX, bodyY, kBodyW, bodyH, 4.0f * sc);
+            g.setColour(juce::Colour(0xFF1C3050u));
+            g.drawRoundedRectangle(bodyX + 0.5f, bodyY + 0.5f, kBodyW - 1.0f, bodyH - 1.0f, 4.0f * sc, 1.0f);
 
-        juce::ColourGradient leverGrad(juce::Colour(0xFFB8C4D0u), leverX, leverY,
-                                        juce::Colour(0xFF6E7C8Au), leverX, leverY + leverH, false);
-        leverGrad.addColour(0.45, juce::Colour(0xFF9AAAB8u));
-        g.setGradientFill(leverGrad);
-        g.fillRoundedRectangle(leverX, leverY, leverW, leverH, 3.0f * sc);
-        g.setColour(juce::Colour(0xFF4A5A70u));
-        g.drawRoundedRectangle(leverX + 0.5f, leverY + 0.5f, leverW - 1.0f, leverH - 1.0f, 3.0f * sc, 1.0f);
+            // Centre groove
+            const float grooveX = bodyX + kBodyW * 0.5f;
+            g.setColour(juce::Colour(0xFF060F1Au));
+            g.fillRect(grooveX - 1.5f * sc, bodyY + 5.0f * sc, 3.0f * sc, bodyH - 10.0f * sc);
+            g.setColour(juce::Colour(0xFF243550u));
+            g.drawLine(grooveX - 0.5f, bodyY + 5.0f * sc, grooveX - 0.5f, bodyY + bodyH - 5.0f * sc, 1.0f);
+
+            // Lever
+            const float leverH  = 14.0f * sc;
+            const float leverW  = kBodyW - 4.0f * sc;
+            const float leverX  = bodyX + 2.0f * sc;
+            const float leverY  = bodyY + (float)position * section + (section - leverH) * 0.5f;
+
+            g.setColour(juce::Colours::black.withAlpha(0.35f));
+            g.fillRoundedRectangle(leverX + sc, leverY + 2.0f * sc, leverW, leverH, 3.0f * sc);
+
+            juce::ColourGradient leverGrad(juce::Colour(0xFFB8C4D0u), leverX, leverY,
+                                            juce::Colour(0xFF6E7C8Au), leverX, leverY + leverH, false);
+            leverGrad.addColour(0.45, juce::Colour(0xFF9AAAB8u));
+            g.setGradientFill(leverGrad);
+            g.fillRoundedRectangle(leverX, leverY, leverW, leverH, 3.0f * sc);
+            g.setColour(juce::Colour(0xFF4A5A70u));
+            g.drawRoundedRectangle(leverX + 0.5f, leverY + 0.5f, leverW - 1.0f, leverH - 1.0f, 3.0f * sc, 1.0f);
+        }
 
         // Labels to the right of the body (configurable via setLabels)
         g.setFont(juce::Font(juce::FontOptions(7.0f * sc)));
