@@ -6,13 +6,25 @@ and writes a JSON report consumable by dashboard_gen.py, report_audit.py, gap_au
 cascade_analysis.py and capture_outlier_scan.py.
 
 Run from repo root:
-    python3 analysis/comprehensive_report.py [--os 8] [--keep-renders DIR]
+    python3 analysis/comprehensive_report.py [--os 8] [--keep-renders DIR] [--jobs N]
+
+Captures are analysed in parallel across a process pool (each capture's render +
+analysis is independent). Defaults to all cores minus a reservation for the OS and
+other running processes — override with --jobs, or pass --jobs 1 to run serially.
+
+Real-pedal capture analysis (load, align, transfer/FR curve, Farina harmonic curve,
+discrete-tone THD) depends only on the capture .wav + the reference test signal —
+never on the plugin — so it's cached to disk per capture file (analysis/.cache/) and
+skipped entirely on later runs as you iterate on the plugin. Pass --no-cache to bypass.
 
 Output: analysis/reports/comprehensive_data.json
 """
 import argparse
+import concurrent.futures
+import hashlib
 import json
 import os
+import pickle
 import subprocess
 import sys
 import tempfile
@@ -28,6 +40,8 @@ import captures as C
 
 DEFAULT_BIN = C.RENDER_BIN
 OUTPUT_JSON = "analysis/reports/comprehensive_data.json"
+CACHE_DIR = "analysis/.cache/pedal_features"
+CACHE_VERSION = 1  # bump to invalidate every cache entry after a change to the analysis below
 DRIVEN_SWEEPS = ("sweep_drv_-18", "sweep_drv_-12", "sweep_drv_-6")
 ALL_SWEEP_LEVELS = ("sweep_clean",) + DRIVEN_SWEEPS
 FARINA_CEILING_HZ = A.thd_max_measurable_hz(max_order=2)
@@ -60,7 +74,72 @@ def render_plugin(binpath, args, out_path, os_factor):
     return True
 
 
-def fr_at_bands(cap_al, ren_al, orig, sweep_name, bands):
+def _pedal_cache_key(path):
+    """Identity of a capture file + the reference signal it's aligned against + the analysis
+    version. A capture is a real recording — it never changes once made — so keying on
+    (path, mtime, size) is enough to detect an edit/re-record without hashing file contents."""
+    st = os.stat(path)
+    ost = os.stat(A.ORIG)
+    payload = {
+        "version": CACHE_VERSION,
+        "path": os.path.abspath(path),
+        "mtime": st.st_mtime,
+        "size": st.st_size,
+        "orig_mtime": ost.st_mtime,
+        "orig_size": ost.st_size,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def compute_pedal_features(cap_al, orig):
+    """All CAPTURE-side (real-pedal) analysis — transfer/FR curve, Farina harmonic curve,
+    discrete-tone THD — for every sweep/tone this report ever reads. None of this depends on the
+    plugin render, so it's exactly what's safe to cache to disk keyed by the capture file."""
+    inp = A.seg_of(orig, "sweep_clean")
+
+    fr_transfer = {sw: A.transfer(A.seg_of(cap_al, sw), inp) for sw in ALL_SWEEP_LEVELS}
+    farina = {sw: A.harmonic_thd_curve(A.seg_of(cap_al, sw), inp, max_order=7) for sw in DRIVEN_SWEEPS}
+
+    tone_thd = {}
+    for t in TONE_FREQS:
+        seg_name = f"tone_{t:g}"
+        try:
+            tone_thd[seg_name] = A.thd(A.seg_of(cap_al, seg_name), t)
+        except Exception:
+            tone_thd[seg_name] = (None, None)
+
+    return {"fr_transfer": fr_transfer, "farina": farina, "tone_thd": tone_thd}
+
+
+def get_pedal_features(path, orig, cache_dir, use_cache=True):
+    """Return (cap_al, pedal_features), loading from disk cache when the capture + reference
+    signal identity matches a prior run. Returns None if the capture is truncated."""
+    cpath = os.path.join(cache_dir, _pedal_cache_key(path) + ".pkl") if use_cache else None
+
+    if use_cache and os.path.exists(cpath):
+        try:
+            with open(cpath, "rb") as fh:
+                return pickle.load(fh)
+        except Exception:
+            pass  # corrupt/partial cache entry -> fall through and recompute
+
+    cap = C.load_capture(path)
+    if not A.is_full_length(cap, orig):
+        return None
+    cap_al, _ = A.align(cap, orig)
+    result = (cap_al, compute_pedal_features(cap_al, orig))
+
+    if use_cache:
+        os.makedirs(cache_dir, exist_ok=True)
+        tmp = f"{cpath}.tmp{os.getpid()}"
+        with open(tmp, "wb") as fh:
+            pickle.dump(result, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, cpath)
+
+    return result
+
+
+def fr_at_bands(cap_al, ren_al, orig, sweep_name, bands, pedal_features):
     """Return (plugin_db, pedal_db, gain_db_applied) at each band."""
     inp = A.seg_of(orig, "sweep_clean")
     cap_seg = A.seg_of(cap_al, sweep_name)
@@ -68,17 +147,16 @@ def fr_at_bands(cap_al, ren_al, orig, sweep_name, bands):
     ren_seg_aligned = A.frac_align(ren_seg, cap_seg)
     _, gain_db = A.null_depth(cap_seg, ren_seg_aligned)
 
-    f, H_cap = A.transfer(cap_seg, inp)
+    f_cap, H_cap = pedal_features["fr_transfer"][sweep_name]
     f, H_ren = A.transfer(ren_seg, inp)
     plugin_db = [float(np.interp(b, f, H_ren)) + gain_db for b in bands]
-    pedal_db = [float(np.interp(b, f, H_cap)) for b in bands]
+    pedal_db = [float(np.interp(b, f_cap, H_cap)) for b in bands]
     return plugin_db, pedal_db, float(gain_db)
 
 
-def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map):
+def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map, pedal_features):
     """Return (plugin_pct, pedal_pct, source) arrays at each band."""
     ref = A.seg_of(orig, "sweep_clean")
-    cap_sweep = A.seg_of(cap_al, sweep_name)
     ren_sweep = A.seg_of(ren_al, sweep_name)
 
     farina_cache = {}
@@ -90,13 +168,14 @@ def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map):
 
     for band_hz, source in band_source_map:
         if source == "farina":
-            if "cap" not in farina_cache:
-                fr_c, thd_c, _ = A.harmonic_thd_curve(cap_sweep, ref, max_order=7)
+            if "ren" not in farina_cache:
+                fr_c, thd_c, _ = pedal_features["farina"][sweep_name]
                 fr_r, thd_r, _ = A.harmonic_thd_curve(ren_sweep, ref, max_order=7)
                 farina_cache["cap_fr"] = fr_c
                 farina_cache["cap_thd"] = thd_c
                 farina_cache["ren_fr"] = fr_r
                 farina_cache["ren_thd"] = thd_r
+                farina_cache["ren"] = True
             p_cap = float(np.interp(band_hz, farina_cache["cap_fr"], farina_cache["cap_thd"]))
             p_ren = float(np.interp(band_hz, farina_cache["ren_fr"], farina_cache["ren_thd"]))
             plugin_pct.append(p_ren)
@@ -107,7 +186,7 @@ def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map):
             tone_seg = f"tone_{nearest_tone:g}"
             if tone_seg not in tone_cache:
                 try:
-                    thd_cap, _ = A.thd(A.seg_of(cap_al, tone_seg), nearest_tone)
+                    thd_cap, _ = pedal_features["tone_thd"][tone_seg]
                     thd_ren, _ = A.thd(A.seg_of(ren_al, tone_seg), nearest_tone)
                     tone_cache[tone_seg] = (float(thd_cap), float(thd_ren))
                 except Exception:
@@ -124,13 +203,12 @@ def thd_at_bands(cap_al, ren_al, orig, sweep_name, band_source_map):
     return plugin_pct, pedal_pct, sources
 
 
-def harmonics_at_anchors(cap_al, ren_al, orig, sweep_name):
+def harmonics_at_anchors(cap_al, ren_al, orig, sweep_name, pedal_features):
     """Return {order: {plugin_db, pedal_db}} at each anchor freq."""
     ref = A.seg_of(orig, "sweep_clean")
-    cap_sweep = A.seg_of(cap_al, sweep_name)
     ren_sweep = A.seg_of(ren_al, sweep_name)
 
-    fr_c, thd_c, Hn_c = A.harmonic_thd_curve(cap_sweep, ref, max_order=7)
+    fr_c, thd_c, Hn_c = pedal_features["farina"][sweep_name]
     fr_r, thd_r, Hn_r = A.harmonic_thd_curve(ren_sweep, ref, max_order=7)
 
     har = {}
@@ -161,12 +239,13 @@ def short_id(parsed):
     return " ".join(parts)
 
 
-def analyse_one(path, parsed, orig, binpath, os_factor, keep_dir, bands, band_source_map):
-    cap = C.load_capture(path)
-    if not A.is_full_length(cap, orig):
-        sys.stderr.write(f"  SKIP (truncated {len(cap)}/{len(orig)}): {os.path.basename(path)}\n")
+def analyse_one(path, parsed, orig, binpath, os_factor, keep_dir, bands, band_source_map,
+                 cache_dir, use_cache):
+    cached = get_pedal_features(path, orig, cache_dir, use_cache)
+    if cached is None:
+        sys.stderr.write(f"  SKIP (truncated): {os.path.basename(path)}\n")
         return None
-    cap_al, _ = A.align(cap, orig)
+    cap_al, pedal_features = cached
 
     args = C.render_args(parsed)
     tmp = None
@@ -203,18 +282,18 @@ def analyse_one(path, parsed, orig, binpath, os_factor, keep_dir, bands, band_so
         }
 
         for sw in ALL_SWEEP_LEVELS:
-            plugin_db, pedal_db, gain_db = fr_at_bands(cap_al, ren_al, orig, sw, bands)
+            plugin_db, pedal_db, gain_db = fr_at_bands(cap_al, ren_al, orig, sw, bands, pedal_features)
             result["fr"][sw] = {"plugin_db": plugin_db, "pedal_db": pedal_db, "gain_db_applied": gain_db}
 
         for sw in DRIVEN_SWEEPS:
             plugin_pct, pedal_pct, sources = thd_at_bands(
-                cap_al, ren_al, orig, sw, band_source_map)
+                cap_al, ren_al, orig, sw, band_source_map, pedal_features)
             result["thd"][sw] = {
                 "plugin_pct": plugin_pct, "pedal_pct": pedal_pct, "source": sources,
             }
 
         for sw in DRIVEN_SWEEPS:
-            result["harmonics"][sw] = harmonics_at_anchors(cap_al, ren_al, orig, sw)
+            result["harmonics"][sw] = harmonics_at_anchors(cap_al, ren_al, orig, sw, pedal_features)
 
         return result
 
@@ -259,12 +338,28 @@ def compute_summary(results, bands):
     return {"by_revision": out}
 
 
+def default_jobs():
+    """All cores minus a reservation for the OS + other running processes."""
+    n = os.cpu_count() or 4
+    reserved = max(1, round(n * 0.2))
+    return max(1, n - reserved)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--bin", default=DEFAULT_BIN)
     ap.add_argument("--os", type=int, default=8)
     ap.add_argument("--keep-renders", default=None)
+    ap.add_argument("--jobs", type=int, default=None,
+                     help=f"parallel worker processes (default: {default_jobs()} "
+                          f"of {os.cpu_count()} cores, reserving some for the OS)")
+    ap.add_argument("--cache-dir", default=CACHE_DIR,
+                     help="disk cache dir for capture-side (pedal) analysis (default: %(default)s)")
+    ap.add_argument("--no-cache", action="store_true",
+                     help="recompute capture-side analysis fresh; don't read or write the cache")
     a = ap.parse_args()
+    jobs = a.jobs if a.jobs and a.jobs > 0 else default_jobs()
+    use_cache = not a.no_cache
 
     if not os.path.exists(a.bin):
         sys.exit(f"OfflineRender not found at {a.bin} — check RENDER_BIN in captures.py or set --bin")
@@ -278,18 +373,40 @@ def main():
     caps = C.find_captures()
 
     sys.stderr.write(f"Comprehensive report: {len(caps)} captures | OS={a.os}x | {len(bands)} bands\n")
-    sys.stderr.write(f"  THD coverage: {sum(1 for _, s in band_source_map if s != 'na')}/{len(bands)} bands\n\n")
+    sys.stderr.write(f"  THD coverage: {sum(1 for _, s in band_source_map if s != 'na')}/{len(bands)} bands\n")
+    sys.stderr.write(f"  jobs: {jobs} (of {os.cpu_count()} cores) | cache: "
+                     f"{'off' if not use_cache else a.cache_dir}\n\n")
 
-    results = []
-    for i, (path, parsed) in enumerate(caps):
-        sys.stderr.write(f"[{i + 1}/{len(caps)}] {short_id(parsed)} ... ")
-        sys.stderr.flush()
-        res = analyse_one(path, parsed, orig, a.bin, a.os, a.keep_renders, bands, band_source_map)
-        if res:
-            sys.stderr.write("done\n")
-        else:
-            sys.stderr.write("FAILED\n")
-        results.append(res)
+    results = [None] * len(caps)
+    if jobs <= 1:
+        for i, (path, parsed) in enumerate(caps):
+            sys.stderr.write(f"[{i + 1}/{len(caps)}] {short_id(parsed)} ... ")
+            sys.stderr.flush()
+            res = analyse_one(path, parsed, orig, a.bin, a.os, a.keep_renders, bands, band_source_map,
+                               a.cache_dir, use_cache)
+            sys.stderr.write("done\n" if res else "FAILED\n")
+            results[i] = res
+    else:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as ex:
+            futures = {
+                ex.submit(analyse_one, path, parsed, orig, a.bin, a.os, a.keep_renders,
+                          bands, band_source_map, a.cache_dir, use_cache): i
+                for i, (path, parsed) in enumerate(caps)
+            }
+            completed = 0
+            for fut in concurrent.futures.as_completed(futures):
+                i = futures[fut]
+                _, parsed = caps[i]
+                completed += 1
+                try:
+                    res = fut.result()
+                except Exception as e:
+                    sys.stderr.write(f"[{completed}/{len(caps)}] {short_id(parsed)} ... FAILED ({e})\n")
+                    res = None
+                else:
+                    sys.stderr.write(f"[{completed}/{len(caps)}] {short_id(parsed)} ... "
+                                      f"{'done' if res else 'FAILED'}\n")
+                results[i] = res
 
     ok = [r for r in results if r]
     sys.stderr.write(f"\n{len(ok)}/{len(results)} captures analysed.\n")

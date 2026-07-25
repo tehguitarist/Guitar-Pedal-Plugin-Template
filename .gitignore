@@ -12,3 +12,4 @@ JuceLibraryCode/
 __pycache__/
 .venv/
 analysis/pedal_results*/
+analysis/.cache/
