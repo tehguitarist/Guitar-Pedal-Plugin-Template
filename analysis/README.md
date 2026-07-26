@@ -23,6 +23,7 @@ python3 analysis/comprehensive_report.py --os 8
 # 5. Generate the dashboard
 python3 analysis/dashboard_gen.py
 # → writes analysis/reports/dashboard.html  (open in browser)
+# Also go and modify the example_dashboard.html in /analysis/reports to fit the specific captures in this project. _
 
 # 6. Audit against acceptance targets
 python3 analysis/report_audit.py --write
