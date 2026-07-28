@@ -134,6 +134,79 @@ match the INPUT LEVEL (a hot-reamp capture is ideal) and compare a per-harmonic 
 harmonics + overall THD already match and the "ceiling" was a level-calibration artifact; the only
 real gap is the missing even harmonics above. Don't chase it with global EQ; it's clipping asymmetry.
 
+### Reverse-breakdown zener-pair clips (back-to-back zener in an op-amp feedback leg)
+
+Some pedals clip with an **antiparallel zener pair** in an op-amp feedback leg rather than forward
+diodes — on each swing one device conducts forward (~Vf 0.6 V) while the other reverse-**breaks
+down** at its rated Vz, so the pair clamps at an effective `Vth = Vf + Vz` (e.g. a 3.3 V zener pair
+clamps around ±3.9 V). `chowdsp_wdf`'s `DiodePairT`/`DiodeT` model forward Shockley conduction only
+(turn-on fixed near ~0.6 V) and cannot place a several-volt knee without an absurd, ill-scaled `Is`
+— don't try to force a plain diode pair into this role by tweaking `Is`/`Vt`; it needs its own
+element.
+
+**Modelling approach — reparameterise the antiparallel-diode wave solve, don't add a new element
+class.** The pair's I-V is odd-symmetric and both branches' "−1" terms cancel →
+`I(V) = 2·Is·sinh(V/Vt)`, which is *exactly* the antiparallel-diode law — so the WDF reflection is
+the same Werner et al. eqn-18 form `DiodePairT`'s `Good` path already uses, just with `(Is, Vt)`
+reparameterised from the zener's physical knee instead of a datasheet diode:
+`Vt = Vzt` (knee softness), `Is = Iref·exp(−Vth/Vzt)` (pins `I(Vth) = Iref` at the datasheet test
+current). Template it on the omega provider like any other diode element — `DiodeQuality::Best`
+hardcodes omega4 (see below), so build this on the `Good`-path reflection directly. Junction
+capacitance goes in as a `CapacitorT` **in parallel** with the pair (two series junction caps →
+about half a single device's Cd), re-discretised on `prepare()` so its corner stays
+sample-rate-independent; it sets the HF rolloff downstream of the clip and is usually the dominant
+cause of a "the top end is darker on this clip mode" mismatch, not the zener knee itself.
+
+**The knee-softness trap that costs real time: do NOT set `Vzt` from the datasheet `r_dif`.**
+`r_dif` (dynamic resistance) is measured deep in breakdown and is far too soft as a single-exponential
+knee — it leaks meaningfully below the rated Vz, which *destroys the small-signal linear gain* and
+clamps soft well under the rating. A sharp knee (roughly an order of magnitude tighter than `r_dif`
+suggests) keeps the sub-knee region open and holds the clamp near the actual rated voltage — much
+closer to how a real zener behaves. Ground `Vth`/`Iref` from the datasheet's Vz-at-test-current row;
+treat `Vzt` as a separate, sharper fit parameter, not derived from `r_dif`.
+
+**What you need from captures to fit this accurately (this is the part that's easy to get wrong):**
+- **Multiple drive/level settings, not just one "sounds about right" capture.** The knee softness
+  (`Vzt`) and junction capacitance (`Cj`) are visible in *how the harmonic spectrum changes shape*
+  as level rises through the knee — a single capture at one level underdetermines both and any fit
+  will overfit to that one operating point.
+- **A capture set with enough independent settings to separate Cj from Vzt/Vth from any downstream
+  EQ.** If every capture you have also varies a tone/level control alongside drive, a change in HF
+  content can't be attributed to Cj vs. that control — fit Cj only from a **matched-pair** capture
+  set (same everything, drive/level swept alone) or accept the fit is confounded and say so.
+  `docs/calibration-and-gain-staging.md`'s matched-pair pattern for tapers applies just as much here.
+- **Don't fit Cj (or any junction parameter) from a small, non-matched capture set and expect a
+  decisive answer.** If the residual error is nearly flat across a wide parameter range (no clear
+  minimum) instead of showing a sharp minimum, that's the tell the capture set can't arbitrate the
+  parameter — stop and get better captures (or accept the schematic/datasheet-nominal value) rather
+  than shipping whichever flat-residual value happened to score best.
+- **A rising or falling harmonic-vs-level slope is a signature of MEMORY, not a static zener
+  parameter — don't keep re-fitting `m`/asymmetry/knee looking for it.** If a capture set shows
+  (say) H2 magnitude changing slope with drive level in a way no static asymmetry (mismatched
+  knee, mismatched Vz, feedback-rail asymmetry) can reproduce — because every static asymmetry's
+  harmonic contribution is flat or monotonic-with-level in one direction, and the capture shows the
+  opposite or a reversal — that is evidence the real circuit has a level-dependent operating point
+  (a self-bias node drooping under asymmetric draw, a decoupling cap not fully settled, etc.), which
+  a memoryless per-sample zener model structurally cannot produce. Treat this as its own investigation
+  (does the schematic have a self-bias/decoupling node whose droop has the right time constant and
+  polarity — a paper feasibility check before touching code) rather than another turn of the
+  static-parameter fitting crank. Confirm with an independent second parameter (e.g. if an `m`-style
+  mismatch fit and a separate rail-asymmetry fit **both** fail to converge on the same capture set,
+  that's two independent refutations of the static-parameter class, not one investigation that
+  needs a third parameter to try.
+- **A cheap value swap between two similar zener parts (same nominal Vz, different Cj/knee) is a
+  fast way to sanity-check whether Cj is even in the right neighbourhood** — drop one part's fitted
+  Cj into the other's clip stage and see if the match improves or regresses. A regression tells you
+  the two stages' captures actually need different Cj values (real per-part variance), not that
+  your fitting method is broken. Tag any such swap `[PROBE]` in the diff and revert it once answered
+  — see the artificial-corrections guardrails in `docs/calibration-and-gain-staging.md`.
+
+**Validate against an independent solve, not just "it sounds right":** an exact-Newton DC solve of
+the same `(Is, Vt)`-reparameterised device, at several drive levels, should agree with the WDF
+reflection to a fraction of a percent below the knee and tighter through it. Confirm THD rises
+monotonically with drive across at least three levels spanning well below/into/above the knee — a
+non-monotonic curve means the solver is struggling, not that the circuit is doing something exotic.
+
 ### Omega accuracy gotcha (do NOT use the default omega)
 
 chowdsp's default `Omega::omega` (omega4) uses bit-trick log/exp approximations that impose a
