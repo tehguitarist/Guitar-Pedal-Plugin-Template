@@ -74,14 +74,23 @@ gain in dB alongside the scaled signal — **always look at that number, don't d
      so ~half the residual was the deliberate tone-taper trade + WDF phase, and the clipping model
      itself agreed to ~−20 dB. Report the nonlinear floor separately; it's the real model-accuracy
      figure.)
-   - **Chasing the deepest null (diagnostic):** a coordinate-descent over the knob params (Bass /
-     Treble / Drive — NOT Volume, which is pure level the gain-match already removes) tells you
-     whether a residual is a small taper-MAPPING offset (deepens with a consistent small tweak
-     across independent captures → worth fixing) or just hand-set knob tolerance / the nonlinear
-     floor (scatters, or barely moves). On the reference build the tweaks were consistent in
-     *direction* but only recovered ~2.5 dB and floored at the same ~−13 dB — confirming the model,
-     not a bug. Note Bass+Drive are often COUPLED (shared feedback network), so their individual
-     offsets trade off in the search and aren't uniquely attributable.
+   - **Make the null KNOB-TOLERANT — a captured knob setting is a best estimate, not ground
+     truth.** The filename/parsed setting records what someone READ OFF a physical pot; a real
+     knob has no digital readout, so the true position can easily be a few percent off the label.
+     Nulling only at the exact labelled value conflates a real model error with a mislabelled
+     capture whenever the null comes out shallower than expected. `analysis/knob_tolerant_null.py`
+     automates the fix: it renders at the labelled ("nominal") settings, then runs a small
+     coordinate-descent search over the continuous knob params (Bass / Treble / Drive — NOT
+     Volume, which is pure level the gain-match already removes) within `--tolerance` (default
+     ±5%) and reports the deepest null found alongside the nominal one. A small nominal→best gap
+     means the label was accurate and the nominal null is the honest model-accuracy number; a
+     large gap (the tool flags anything > 1 dB) means the label was probably off and the model
+     shouldn't be blamed for the nominal residual — judge it by the best-null figure instead. On
+     the reference build this coordinate-descent recovered ~2.5 dB and floored at the same ~−13 dB
+     across independent captures with consistent tweak *direction* — confirming the model, not a
+     bug. Note Bass+Drive are often COUPLED (shared feedback network), so their individual offsets
+     trade off in the search and aren't uniquely attributable; the tool re-visits every knob every
+     round for exactly this reason rather than optimizing each once.
 4. **Knob-tracking pass/fail** — at every captured setting, does the plugin match the real pedal?
    Separate three things with explicit thresholds, because they fail for different reasons:
    - **SHAPE** — EQ compared RELATIVE to 1 kHz (level offset removed) → tone-stack accuracy.

@@ -54,6 +54,7 @@ python3 analysis/report_audit.py --write
 | `gap_audit.py` | ~260 | Grades every FR band + THD point against configurable thresholds (HUGE >3 dB / target >1.5 dB / good ≤1 dB). Reports **mean and spread** per band: large spread = setting-dependent error (taper/drive-tracking); consistent mean = fixed shape error (component value). **`--mode shape`** grades the CURVE, not just each point: fits a dB/octave trend line per revision (catches a bass-light/treble-heavy tilt that no single band is big enough to flag) and groups flagged bands into contiguous runs vs isolated spikes (a run is more likely a real curve feature, correct or not; an isolated spike is more likely noise or a narrow anomaly worth its own look) — see `docs/validation-and-capture.md` §1b. |
 | `cascade_analysis.py` | 115 | Separates FR gaps by **which circuit stage** can cause them. Uses blend, drive, and frequency-region discriminators to prevent fitting a downstream stage to compensate for an upstream error. Runs on JSON only — no re-rendering. **Replace the `REGIONS` tuple with your pedal's frequency bands of interest.** |
 | `capture_outlier_scan.py` | 263 | Flags captures that disagree with all siblings. Separates **capture-intrinsic** physics violations (corrupt file — quarantine) from **plugin-vs-capture** disagreement (real gap — investigate). Never says "wrong"; hands you the question. Runs on JSON only. |
+| `knob_tolerant_null.py` | ~230 | **Knob-tolerant null test.** A captured knob setting is a best estimate someone read off a physical pot, not ground truth — nulling only at the exact label conflates a real model error with a mislabelled capture. Renders at the labelled ("nominal") settings, then coordinate-descends the continuous knob params within `--tolerance` (default ±5%) to find the deepest null, reporting both. A big nominal→best gap flags "label was probably off, judge the model by the best null"; a small gap confirms the nominal null is the honest accuracy number. **Re-renders the plugin** per trial (needs `captures.render_args()`). |
 
 ### Tooling Integrity Tests
 
@@ -205,6 +206,13 @@ If your pedal uses different knob labels, write your own `parse_capture()` in
   curve shape or sibling captures. Always also run `--mode shape` (trend-line
   fit + contiguous-run vs. isolated-spike check) before calling a revision
   done — see `docs/validation-and-capture.md` §1b.
+- **A capture's knob setting is a best estimate, not ground truth** — it's a
+  label someone read off a physical pot with no digital readout, so it can
+  easily be a few percent off the true position. A shallow null against the
+  exact labelled setting can mean the MODEL is wrong or the LABEL is wrong,
+  and those need opposite fixes. Use `knob_tolerant_null.py` (coordinate-
+  descends the knob params within a small tolerance to find the deepest null)
+  before blaming the model for a nominal-setting null that doesn't deepen.
 
 ## Dependencies
 
