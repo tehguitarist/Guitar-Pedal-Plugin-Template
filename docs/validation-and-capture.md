@@ -88,6 +88,38 @@ gain in dB alongside the scaled signal — **always look at that number, don't d
    - **LEVEL** — absolute output at 1 kHz → the gain-staging/makeup calibration.
    - **THD** — distortion amount → clipping character.
 
+## 1b. Grade the CURVE, not just each point on it
+
+Per-band/per-point pass/fail (§1, `gap_audit.py`'s HUGE/target/good grading) is necessary but not
+sufficient — two failure modes hide from it in opposite directions:
+
+- **A systematic tilt can hide inside "every point passes."** A response that's −1 dB at 80 Hz and
+  +1 dB at 8 kHz, ramping smoothly in between, has every single 1/3-octave band "within 2 dB" —
+  often each individually graded "good" — yet the *shape* is an audible bass-light/treble-heavy
+  tilt the pedal doesn't have. Point grading can't see this because it never looks at adjacent
+  bands together; it only asks "is this one number under the threshold." Catch it by fitting a
+  trend across bands (e.g. least-squares slope of Δ dB vs log2(frequency), reported in dB/octave)
+  and flagging a slope that's small-per-band but large end-to-end, even when no individual point
+  is HUGE or even "target."
+- **A real, correct notch can get misread as an anomaly** when it's judged only against its own
+  absolute value or against sibling captures, with no reference to the surrounding curve shape.
+  A big dip that's genuinely present in the real pedal (a feedback-network anti-resonance, a
+  switched-mode null) is CORRECT and should be treated as signal, not thrown out — see
+  `capture_outlier_scan.py`'s docstring, which exists specifically because a real Gap-J-style
+  reading was almost discarded as a bad capture. Before flagging any single-band deviation as
+  suspicious, check whether it's an ISOLATED spike (one band, neighbors clean) or part of a
+  CONTIGUOUS run (several adjacent bands moving together) — a contiguous run is much more likely
+  to be a real, physically-motivated curve feature (or a real systematic model error) than
+  measurement noise; an isolated one-band spike is more likely to be noise, a single mis-tapped
+  band, or a genuine narrow anomaly worth its own investigation. Either way, that classification is
+  the useful output — not an automatic verdict.
+
+**Practical rule:** whenever you run the point-by-point grade (`gap_audit.py --mode summary` /
+`--mode detail`), also run `--mode shape` (added alongside it) and read both before deciding a
+revision is "done." A clean point-grade table with a bad tilt, or a "HUGE" flag that turns out to
+be the leading edge of a run every sibling capture agrees on, are both real findings the point
+grade alone will miss.
+
 ---
 
 ## 2. Wiring it to your pedal

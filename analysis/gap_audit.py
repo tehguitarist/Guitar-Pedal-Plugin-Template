@@ -16,7 +16,22 @@ Usage (from repo root):
   python3.11 analysis/gap_audit.py                  # per-revision aggregate (start here)
   python3.11 analysis/gap_audit.py --mode detail    # per-capture, per-band deviations
   python3.11 analysis/gap_audit.py --mode thd       # THD(f) curves, plugin vs pedal
+  python3.11 analysis/gap_audit.py --mode shape     # curve-level tilt + contiguous-run check
   python3.11 analysis/gap_audit.py --rev V1E        # one revision
+
+WHY `--mode shape` EXISTS (read this before trusting a clean `--mode summary` table). Point-by-point
+grading can't see two real failure modes:
+  - A systematic TILT (bass light, treble heavy or vice versa) where every individual band is
+    "good" or "target" in isolation, but the trend end-to-end is an audible, real EQ error. No
+    single point ever crosses HUGE, so `--mode summary` reports a clean sheet.
+  - A single-band "HUGE" flag that's actually the front edge of a CONTIGUOUS run every sibling
+    capture agrees on (i.e. probably a real, physically-motivated curve feature — see
+    `capture_outlier_scan.py`'s docstring for a case this nearly cost real data) versus a true
+    ISOLATED one-band spike (much more likely noise or a narrow, genuine local anomaly).
+`--mode shape` fits a straight-line trend (dB/octave) through each revision/level's per-band mean
+Δ and reports the run-structure of flagged bands, specifically so a "PASS" from `--mode summary`
+doesn't get treated as "the FR curve is right" without also checking its shape. See
+`docs/validation-and-capture.md` §1b.
 """
 import argparse
 import json
@@ -123,6 +138,108 @@ def mode_detail(d, caps, huge, target):
                     print("  target: " + ", ".join(f"{f:.0f}Hz:{v:+.1f}" for f, v in targetv))
 
 
+DEFAULT_NOTICE = 1.0  # a smaller-than-"target" per-band delta still counts toward a contiguous run
+
+
+def _fit_trend(points):
+    """Least-squares line through (log2(f), delta) pairs. Returns (slope_db_per_oct, intercept,
+    residual_rms) with no numpy dependency. slope is dB per octave; residual_rms is the spread
+    left AFTER removing the trend (what's left over once the tilt itself is accounted for)."""
+    n = len(points)
+    if n < 2:
+        return 0.0, (points[0][1] if points else 0.0), 0.0
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    sxx = sum((x - mean_x) ** 2 for x in xs)
+    sxy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    slope = sxy / sxx if sxx > 0 else 0.0
+    intercept = mean_y - slope * mean_x
+    resid = [y - (slope * x + intercept) for x, y in points]
+    resid_rms = (sum(r * r for r in resid) / n) ** 0.5
+    return slope, intercept, resid_rms
+
+
+def _runs(flagged):
+    """Group a sorted list of (freq, delta, sign) into contiguous same-sign runs. Adjacent here
+    means adjacent in the BAND LIST (no gap), not just nearby in frequency — a run with a clean
+    band in the middle is two runs, not one."""
+    runs, current = [], []
+    for item in flagged:
+        if current and item[2] == current[-1][2]:
+            current.append(item)
+        else:
+            if current:
+                runs.append(current)
+            current = [item]
+    if current:
+        runs.append(current)
+    return runs
+
+
+def mode_shape(d, caps, huge, target):
+    """Curve-level check, complementing the per-point grade above (§1b of
+    docs/validation-and-capture.md): (1) fit a trend line (dB/octave) through each band-mean
+    curve to catch a systematic tilt that no single point is large enough to flag on its own;
+    (2) group flagged bands into contiguous runs vs isolated spikes, since a multi-band run is
+    much more likely to be a real curve feature (correct OR a real shape error) than an isolated
+    single-band deviation, which is more likely measurement noise or a genuinely narrow anomaly.
+    """
+    import math
+
+    bands = d["meta"]["bands"]
+    revs = sorted({c["rev"] for c in caps})
+    TILT_NOTE_DB_PER_OCT = 0.15  # ~0.15 dB/oct over a 20Hz-12kHz span is ~1.4 dB end-to-end
+
+    for label, want_clean in (("CLEAN sweep", True), ("DRIVEN sweeps (-18/-12/-6)", False)):
+        print("=" * 92)
+        print(f"CURVE SHAPE — trend + contiguous-run check — {label}")
+        print("=" * 92)
+        for rev in revs:
+            acc = defaultdict(list)
+            for c in caps:
+                if c["rev"] != rev:
+                    continue
+                for level, fr in c["fr"].items():
+                    if (level == "sweep_clean") != want_clean:
+                        continue
+                    for i, f in enumerate(bands):
+                        if in_grade_range(f):
+                            acc[f].append(fr["plugin_db"][i] - fr["pedal_db"][i])
+            means = [(f, sum(v) / len(v)) for f, v in acc.items() if v]
+            means.sort()
+            if len(means) < 2:
+                continue
+
+            trend_points = [(math.log2(f), m) for f, m in means]
+            slope, intercept, resid_rms = _fit_trend(trend_points)
+            octaves = math.log2(means[-1][0] / means[0][0])
+            end_to_end = slope * octaves
+            tilt_flag = " <== TILT" if abs(slope) > TILT_NOTE_DB_PER_OCT else ""
+
+            print(f"\n--- {rev} ---")
+            print(f"  trend: {slope:+.3f} dB/oct  ({end_to_end:+.2f} dB end-to-end over "
+                  f"{octaves:.1f} oct, {means[0][0]:.0f}-{means[-1][0]:.0f} Hz)"
+                  f"  residual(after detrend) rms={resid_rms:.2f} dB{tilt_flag}")
+            if tilt_flag:
+                print("    every band above may individually grade 'good', but this end-to-end "
+                      "trend is a real, audible EQ tilt — see docs/validation-and-capture.md §1b")
+
+            flagged = [(f, m, "+" if m > 0 else "-") for f, m in means if abs(m) > DEFAULT_NOTICE]
+            for run in _runs(flagged):
+                lo, hi = run[0][0], run[-1][0]
+                kind = "CONTIGUOUS RUN" if len(run) >= 3 else "isolated"
+                worst = max(run, key=lambda r: abs(r[1]))
+                g = grade(worst[1], huge, target)
+                print(f"  {kind:15s} {lo:8.1f}-{hi:8.1f}Hz  ({len(run)} bands, "
+                      f"worst={worst[1]:+.2f}dB@{worst[0]:.0f}Hz, grade={g})")
+                if kind == "isolated" and g == "HUGE":
+                    print("    single-band HUGE with clean neighbors — check this against sibling "
+                          "captures (capture_outlier_scan.py) before assuming it's a plugin bug")
+        print()
+
+
 def mode_thd(d, caps, huge, target):
     """THD(f) plugin vs pedal on the Farina-swept bands. THD is a RATIO, so it is immune to the
     capture level-normalization — these numbers are trustworthy without gain-matching."""
@@ -151,7 +268,7 @@ def mode_thd(d, caps, huge, target):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--mode", choices=("summary", "detail", "thd"), default="summary")
+    ap.add_argument("--mode", choices=("summary", "detail", "thd", "shape"), default="summary")
     ap.add_argument("--rev", choices=("V1E", "V1L", "V2"), default=None)
     ap.add_argument("--huge", type=float, default=DEFAULT_HUGE)
     ap.add_argument("--target", type=float, default=DEFAULT_TARGET)
@@ -167,7 +284,8 @@ def main():
     print(f"# grading: HUGE>|{a.huge}|dB  target>|{a.target}|dB  graded band {GRADE_LOW_HZ:.0f}-{GRADE_HIGH_HZ:.0f}Hz")
     print(f"# captures: {len(caps)}\n")
 
-    {"summary": mode_summary, "detail": mode_detail, "thd": mode_thd}[a.mode](d, caps, a.huge, a.target)
+    {"summary": mode_summary, "detail": mode_detail, "thd": mode_thd,
+     "shape": mode_shape}[a.mode](d, caps, a.huge, a.target)
 
 
 if __name__ == "__main__":
