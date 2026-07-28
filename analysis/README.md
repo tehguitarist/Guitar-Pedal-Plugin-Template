@@ -197,6 +197,14 @@ If your pedal uses different knob labels, write your own `parse_capture()` in
   partial-blend FR read shows a false "plugin too bright" error.
 - **Always write analysis scripts as files**, never as inline commands. Renders
   take seconds each; Farina harmonic analysis takes seconds per segment.
+- **Grade the curve, not just each point** — point-by-point FR/THD grading
+  (`gap_audit.py --mode summary`/`detail`) can't see a systematic tilt (every
+  band individually "good," but bass-light/treble-heavy end-to-end is still a
+  real, audible EQ error) and can misjudge a real, correct notch as an anomaly
+  when it's read only in isolation, with no reference to the surrounding
+  curve shape or sibling captures. Always also run `--mode shape` (trend-line
+  fit + contiguous-run vs. isolated-spike check) before calling a revision
+  done — see `docs/validation-and-capture.md` §1b.
 
 ## Dependencies
 
