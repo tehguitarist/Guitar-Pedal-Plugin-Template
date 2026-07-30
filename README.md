@@ -9,6 +9,8 @@ A starting point for building a new circuit-level guitar-pedal plugin (AU/VST3, 
 reinvent the wheel each time. Nothing here is tied to a specific pedal — fill in the `<...>`
 placeholders for yours.
 
+Please note, whilst this template is geared toward AI assistance, if you don't have a basic grounding in software development, electronics, audio physics, harmonics, and how the pedals really work, you will have an extremely difficult time.
+
 ## What's here
 
 ```
