@@ -1,5 +1,9 @@
 # Pedal Plugin Template
 
+![Build](https://github.com/tehguitarist/Guitar-Pedal-Plugin-Templateactions/workflows/ci.yml/badge.svg?branch=main)
+[![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://opensource.org/license/agpl-v3)
+[![Downloads](https://img.shields.io/github/downloads/tehguitarist/Guitar-Pedal-Plugin-Template/total)](https://somsubhra.github.io/github-release-stats/?username=tehguitarist&repository=Guitar-Pedal-Plugin-Template&page=1&per_page=30)
+
 A starting point for building a new circuit-level guitar-pedal plugin (AU/VST3, JUCE 8+,
 `chowdsp_wdf`), capturing hard-won generic engineering, validation tooling, and UI so you don't
 reinvent the wheel each time. Nothing here is tied to a specific pedal — fill in the `<...>`
