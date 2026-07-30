@@ -1,6 +1,6 @@
 # Pedal Plugin Template
 
-![Build](https://github.com/tehguitarist/Guitar-Pedal-Plugin-Templateactions/workflows/ci.yml/badge.svg?branch=main)
+![Build](https://github.com/tehguitarist/Guitar-Pedal-Plugin-Template/actions/workflows/ci.yml/badge.svg?branch=main)
 [![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://opensource.org/license/agpl-v3)
 [![Downloads](https://img.shields.io/github/downloads/tehguitarist/Guitar-Pedal-Plugin-Template/total)](https://somsubhra.github.io/github-release-stats/?username=tehguitarist&repository=Guitar-Pedal-Plugin-Template&page=1&per_page=30)
 
