@@ -28,8 +28,16 @@ OUT_PATH = "analysis/reports/executive_summary.txt"
 
 # N-004: the sweep starts at 20 Hz, so the bottom bins are the least-supported points of the
 # excitation. Never anchor there. 18 kHz is the user's stated top of interest.
+# For bass applications, extend TRUST_LO lower (e.g. 30 Hz) — the low-E fundamental (~41 Hz) and
+# low-B (~31 Hz) must be covered.
 TRUST_LO, TRUST_HI = 40.0, 18000.0
 EXTREME_LO, EXTREME_HI = 60.0, 12000.0  # inside this = "within 1.5 dB"; outside = "within 3 dB"
+# NOTE: EXTREME_HI at 12 kHz is the boundary where the 1.5 dB target tightens to 3 dB — it is NOT
+# a claim that the range above 12 kHz doesn't matter. The top octave (12-18 kHz) is still measured
+# and graded; it just uses a relaxed tolerance because measurement SNR naturally degrades there.
+# Saturation harmonics extend into this octave and the FR shape here affects perceived brightness;
+# if your plugin targets high-gain or bass, verify the top octave explicitly rather than relying
+# solely on the relaxed pass.
 
 # Gap G / standing traps: the twin-T (~800 Hz, all revs) and V1's bridged-T (~430 Hz) notch the
 # FUNDAMENTAL. THD and every per-order ratio divide BY that fundamental, so both anchors inflate for

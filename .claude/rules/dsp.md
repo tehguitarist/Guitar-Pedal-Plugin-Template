@@ -298,8 +298,9 @@ Two fixes, a real trade-off:
   −4 dB @8k / −10 @12k / −21 @16k; 2× ≈ a quarter of that in dB; 4×/8× negligible — measure with
   `OSFidelity`). The droop is essentially POT-INDEPENDENT and scales with the OS factor, so a single
   fixed-shape high-shelf (one biquad at base rate, gain set PER OS factor, ~0 at 4×/8× so it's
-  transparent at the default) recovers most of it — 1× to within ~±1 dB through 12 kHz. It can't
-  invert the near-Nyquist zero (16 kHz stays down — accepted, least audible). Always-on (self-
+   transparent at the default) recovers most of it — 1× to within ~±1 dB through 12 kHz. It can't
+   invert the near-Nyquist zero (16 kHz stays attenuated; verify audibility with your signal chain
+   rather than assuming it's inaudible). Always-on (self-
   disables where there's no droop); makes low-OS "sound close" so high-OS only refines aliasing.
 
 Independent of supply-voltage / rail features (those scale amplitude headroom; prewarp corrects

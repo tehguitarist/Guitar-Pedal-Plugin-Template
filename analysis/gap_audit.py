@@ -40,10 +40,15 @@ from pathlib import Path
 
 REPORT = Path(__file__).parent / "reports" / "comprehensive_data.json"
 
-# Bands outside this range are excluded from grading: below ~25 Hz the sweep has little energy
-# and the NAM captures' own noise floor dominates; above ~12.9 kHz the recovery cab-sim rolloff
-# has already put both signals near the measurement floor, where a dB delta is meaningless.
-# These are measurement limits, not a claim the plugin is correct there.
+# Bands outside this range are excluded from the STRICT (1.5 dB) grading pass but are still
+# checked against a relaxed 3 dB threshold (see EXTREME_LO/EXTREME_HI in report_audit.py).
+# At the bottom: below ~25 Hz the excitation sweep carries little energy, so the derived FR
+# and THD band readings have degraded SNR — but for BASS applications this range contains the
+# low-E fundamental (~41 Hz) and should be verified with a longer, bass-weighted sweep.
+# At the top: above ~12.9 kHz the measurement SNR degrades (the source signal's energy drops
+# naturally); a dB delta here is noisier, not meaningless. Saturation products reach well into
+# this octave and the FR shape here affects perceived brightness, so the relaxed 3 dB pass
+# still applies — the band is measured, just graded with wider tolerance.
 GRADE_LOW_HZ = 25.0
 GRADE_HIGH_HZ = 12900.0
 

@@ -103,7 +103,10 @@ Without limiting, each order produces a large spurious spike at exactly
 `SWEEP_F1/N` (e.g., H7 spikes at 2857 Hz). With limiting:
 - Nothing below ~2714 Hz changes (all 7 orders in-band)
 - Coverage extends to ~9.5 kHz (H2 only)
-- Above 12 kHz, THD doesn't exist at 48 kHz (H2 past Nyquist)
+- Above 12 kHz, individual harmonic orders are unmeasurable at 48 kHz (H2 lands
+  past Nyquist) — this is a sampling-theory limit, not a statement that the FR
+  or THD in the top octave is irrelevant. The FR shape here still affects
+  perceived brightness, especially when saturation is active.
 
 ### Calibration Workflow (the proven order)
 

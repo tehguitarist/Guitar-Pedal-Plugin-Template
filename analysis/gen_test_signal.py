@@ -27,9 +27,11 @@ Design notes (hard-won — see docs/validation-and-capture.md):
     capture. Valid for a memoryless/instantaneous nonlinearity (diode + op-amp clipping).
   - All sweeps are the SAME length (10 s) so there's one inverse-filter length and well-spaced
     harmonic impulse responses (short sweeps pack harmonics too close and the gating overlaps).
-  - NO CCIF 19k+20k twin-tone: near Nyquist the pedal has rolled everything off and the plugin's
-    antialiasing vs the analog pedal makes the A/B unreliable. The guitar-band twin-tone is where
-    audible chord intermod actually lives.
+  - NO CCIF 19k+20k twin-tone (default): near Nyquist the antialiasing filter response creates a
+    large, predictable difference between plugin and analog pedal — it's measuring antialiasing
+    design, not the modelled circuit's IMD character. The guitar-band twin-tone (220+660 Hz) is
+    where audible chord intermod actually lives. If your plugin needs to validate antialiasing
+    behaviour specifically, add a 19k+20k test segment explicitly.
 
   ** Changing this layout invalidates existing captures.** Only ever APPEND new segments at the end
   (and re-capture); inserting in the middle shifts every later segment's offset.

@@ -36,7 +36,7 @@ REGIONS = (
     ("twin-T notch ~800Hz (ALL revs)", 600.0, 1000.0),
     ("mid 1-2.5kHz", 1000.0, 2560.0),
     ("presence/treble 2.5-5kHz", 2560.0, 5120.0),
-    ("cab-sim rolloff 5-13kHz", 5120.0, 12900.0),
+    ("HF rolloff 5-13kHz", 5120.0, 12900.0),
 )
 
 

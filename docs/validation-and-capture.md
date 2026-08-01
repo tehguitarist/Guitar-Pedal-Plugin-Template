@@ -50,8 +50,8 @@ gain in dB alongside the scaled signal — **always look at that number, don't d
 
    For the actual pass/fail check, don't stop at the continuous curve — bucket it with
    `banded_thd()`, which reuses **the same 31-band grid as the FR analysis above** but reports only
-   the **100 Hz–12 kHz subset** of it (where most saturation character lives, and where the driven
-   sweep has usable SNR) — it is not a separate band layout, so a THD band and an FR band at the
+    the **100 Hz–12 kHz subset** of it (where driven-sweep SNR is best and most of the audible
+    harmonic structure concentrates) — it is not a separate band layout, so a THD band and an FR band at the
    same center line up exactly. Report, per band: aggregate THD% AND each harmonic order's
    amplitude relative to the fundamental (dB). Two circuits can land on the same aggregate THD%
    with completely different harmonic **placement** (which bands carry the distortion) and
