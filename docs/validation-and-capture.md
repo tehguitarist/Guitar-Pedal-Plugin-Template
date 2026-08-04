@@ -59,7 +59,26 @@ gain in dB alongside the scaled signal — **always look at that number, don't d
    actually validates clip character, the single-number THD curve only validates clip *amount*.
    Cross-reference against the low-frequency discrete-tone harmonic check in
    `calibration-and-gain-staging.md` §6b, which validates even/odd balance at one frequency in
-   detail; `banded_thd()` extends that check across the 100 Hz–12 kHz range.
+       detail; `banded_thd()` extends that check across the 100 Hz–12 kHz range.
+
+    **Use ALL four sweep drives in every comparison.** The test signal provides clean (−30 dBFS),
+    −18 dBFS, −12 dBFS, and −6 dBFS sweeps for a reason — each answers a different question, and a
+    model validated at only one drive level is only validated at one operating point:
+
+    - **Clean (−30 dBFS)**: the linear FR / tone-stack shape. Read EQ only from this one.
+    - **−18 dBFS**: edge-of-breakup / light overdrive. This is where harmonic structure first appears
+      and where the transition from clean to clipping reveals the clip *knee* — the most
+      touch-sensitive region. Real playing spends a lot of time here and at quieter levels.
+    - **−12 dBFS**: moderate overdrive. The pedal's "normal" driven sound; most of the audible
+      harmonic balance lives here.
+    - **−6 dBFS**: hot pickup / heavy clipping. Tests the clipping *ceiling*, hard-clip symmetry, and
+      whether the model hardens or compresses the same way the real pedal does at maximum signal.
+
+    A model that nails the −12 dBFS THD curve but misses −18 dBFS has the wrong clip knee (turning on
+    too abruptly or too softly). One that nails −18 dBFS but blows out at −6 dBFS has a ceiling or
+    symmetry error. Skipping any drive level leaves a gap in the validation that the next comparison
+    may not catch — quiet-level errors don't necessarily show up at hot levels, and vice versa.
+
 3. **Null test** — `frac_align()` then `null_depth()`: sub-sample align, optimal-gain level-match,
    subtract, report residual dB. **It measures timbre/shape/phase, NOT absolute level** (the gain
    match removes level). Report the BEST null (cleanest linear setting — the README headline) and
