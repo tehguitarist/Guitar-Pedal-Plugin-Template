@@ -68,6 +68,14 @@ warp (see "Top-octave accuracy" below), check this before reaching for a prewarp
 
 ## Nonlinear elements (clipping diodes)
 
+> ⚠ **Diodes are the WDF-native case. If your pedal's distortion comes from a CMOS inverter
+> (CD4049UB/CD4069UB) or a JFET/MOSFET gain stage, chowdsp has no element for it — read
+> `docs/nonlinear-component-modeling.md` BEFORE writing that stage.** It carries the sources, the
+> recommended models, and the structural traps (a degenerated common-source stage is a *current*
+> source, not a voltage source; finite CMOS open-loop gain is voicing rather than a refinement; a
+> tanh cannot make an even-dominant stage), plus the cross-cutting solver/ADAA/fitting rules for any
+> non-WDF-native nonlinearity.
+
 ```cpp
 // Antiparallel pair (symmetric clip):
 wdft::DiodePairT<double, decltype(next), wdft::DiodeQuality::Good, AccurateOmega> dp { next, Is, Vt, nDiodes };
@@ -317,6 +325,15 @@ frequency) — the two never interact.
   worth it if listening reveals residual diode aliasing at low OS factors.
 - 1st-order ADAA: `y = (F1(x) - F1(xPrev)) / (x - xPrev)`, with a midpoint fallback when
   `|x - xPrev|` is tiny. Update the state every sample so toggling is glitch-free.
+- ⭐⭐ **"The stage has memory" does NOT rule ADAA1 out.** The derivation needs a memoryless *map*
+  with an argument that is ~linear between samples — nothing requires that argument to be the
+  stage's input. A waveshaper inside a per-sample implicit solve qualifies: substitute the averaged
+  value **inside** the residual, not at the output.
+- ⛔ Do NOT split a map to dodge the 2-point-average cost, and do NOT substitute quadrature for a
+  missing antiderivative. Both are measured-wrong, not merely inelegant.
+- ⭐ **Gate ADAA by oversampling factor** — its benefit shrinks as OS rises and can go negative.
+- **Full derivations, measurements and remedies for all four points above:**
+  `docs/nonlinear-component-modeling.md` §5.1.
 - Reference: Esqueda et al., "Antiderivative Antialiasing in Nonlinear Wave Digital Filters",
   DAFx 2020.
 

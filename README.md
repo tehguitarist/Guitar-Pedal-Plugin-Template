@@ -25,9 +25,11 @@ CLAUDE.md                          project-memory template + the build/validatio
   schematic-checker.md             reads circuit.md, answers component/topology questions exactly
   dsp-validator.md                 checks a DSP stage's implementation against circuit.md/dsp.md
 docs/
+  nonlinear-component-modeling.md  ★ the parts WDF can't model: CMOS clippers, JFETs, op-amp rails
   calibration-and-gain-staging.md  ★ the hard-won DSP/level lessons — read first
   validation-and-capture.md        ★ how to measure accuracy vs the real pedal + capture protocol
   ui-peripheral-spec.md            full visual spec for the reusable UI elements
+  refs/                            datasheets + DAFx papers the nonlinear doc cites
 analysis/
   gen_test_signal.py               comprehensive A/B capture signal (sweep + driven + IMD + tones)
   analyze.py                       reusable harness: FR, THD (incl. Farina swept), null + null-floor
@@ -50,7 +52,9 @@ dark-navy theme; recolour via the constants in `PedalLookAndFeel.h`.
 
 1. Copy this folder to a new repo (or `cp -R` it and `git init`).
 2. Add JUCE / chowdsp_wdf (+ optional xsimd) as submodules under `libs/` (see `.claude/rules/build.md`).
-3. Drop the schematic images into `schematics/` and fill in `.claude/rules/circuit.md`.
+3. Drop the schematic images into `schematics/` and fill in `.claude/rules/circuit.md`. Triage the
+   parts list against `docs/nonlinear-component-modeling.md` §0 and gather external data for
+   anything not WDF-native **now**, not once you're mid-DSP.
 4. Write `CMakeLists.txt` from `CMakeLists.txt.template` (replace every `<PLACEHOLDER>`; see build.md
    for the structure), then `PluginProcessor`/`PluginEditor` following `architecture.md`.
 5. Follow the build/validation sequence in `CLAUDE.md`, validating each stage.

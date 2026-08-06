@@ -51,6 +51,13 @@ high, execute routine work cheap) is what should persist.
 
 ## Essential reading (template learnings — do not skip)
 
+- **`docs/nonlinear-component-modeling.md`** — the parts `chowdsp_wdf` has **no element for**: CMOS
+  inverter clippers (CD4049UB/CD4069UB), JFET/MOSFET gain stages (J201 & friends), and op-amp output
+  rails. Sources + datasheets (`docs/refs/`), recommended models, the structural traps that cost the
+  most time (a degenerated common-source stage is a *current* source; finite CMOS open-loop gain is
+  voicing not a refinement; a tanh cannot produce an even-dominant stage; check the sign of the cubic
+  before choosing a limiter), and the cross-cutting solver / ADAA / fitting rules. **Triage your
+  parts list against its §0 before writing any nonlinear stage.**
 - **`docs/calibration-and-gain-staging.md`** — input-load (`kInputRef`) calibration, output-makeup
   calibration (level-match to captures — NOT a ~0.9 headroom pad; see §2), the DRIVE taper-floor
   bug, output-load (negligible), internal-vs-output clipping, op-amp rails, VU idle gate. This is
@@ -86,6 +93,8 @@ high, execute routine work cheap) is what should persist.
 1. **Schematic analysis** → fill `circuit.md`. Heed the schematic-reading gotchas there. Use the
    `schematic-checker` agent to cross-check any value/topology question against what's already
    captured, rather than re-reading the schematic image from scratch each time.
+   **Then triage the parts list against `docs/nonlinear-component-modeling.md` §0** and gather the
+   external data for anything not WDF-native — before DSP, not during it.
 2. **CMake scaffold** — APVTS + AU/VST3 targets loading in a DAW.
 3. **chowdsp_wdf smoke test** — trivial RC lowpass, confirm −3 dB point within 1% (offline/unit
    test, not a visual guess).
