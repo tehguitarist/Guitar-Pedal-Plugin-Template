@@ -58,6 +58,12 @@ high, execute routine work cheap) is what should persist.
   voicing not a refinement; a tanh cannot produce an even-dominant stage; check the sign of the cubic
   before choosing a limiter), and the cross-cutting solver / ADAA / fitting rules. **Triage your
   parts list against its §0 before writing any nonlinear stage.**
+- **`docs/measurement-discipline.md`** — the analysis-side traps: building instruments and known
+  answers, mutation-testing guards, thresholds, aggregates and membership, fits and degeneracy,
+  screening candidate mechanisms, reading physical measurements, staleness, and process. Every entry
+  is a failure mode that has inverted a conclusion already written down as fact. **Skim once at the
+  start; re-read the relevant section before building an instrument, trusting an aggregate, or
+  shipping a constant.**
 - **`docs/calibration-and-gain-staging.md`** — input-load (`kInputRef`) calibration, output-makeup
   calibration (level-match to captures — NOT a ~0.9 headroom pad; see §2), the DRIVE taper-floor
   bug, output-load (negligible), internal-vs-output clipping, op-amp rails, VU idle gate. This is

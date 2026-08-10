@@ -26,6 +26,7 @@ CLAUDE.md                          project-memory template + the build/validatio
   dsp-validator.md                 checks a DSP stage's implementation against circuit.md/dsp.md
 docs/
   nonlinear-component-modeling.md  ★ the parts WDF can't model: CMOS clippers, JFETs, op-amp rails
+  measurement-discipline.md        ★ the analysis traps: instruments, aggregates, fits, screens
   calibration-and-gain-staging.md  ★ the hard-won DSP/level lessons — read first
   validation-and-capture.md        ★ how to measure accuracy vs the real pedal + capture protocol
   ui-peripheral-spec.md            full visual spec for the reusable UI elements
@@ -84,3 +85,11 @@ dark-navy theme; recolour via the constants in `PedalLookAndFeel.h`.
 7. **Never reconstruct a WDF node voltage from a source port's voltage** — combine only passive
    ports, or you get a spurious one-sample-averaged low-pass that masquerades as ordinary bilinear
    warping (`.claude/rules/dsp.md`).
+8. **A degenerated common-source JFET stage is a CURRENT source, not a voltage source** — model it
+   as a Norton current with its output impedance stamped into the next stage, or the source-bypass
+   cap's "HF lift" gets double-counted, worth ~20 dB
+   (`docs/nonlinear-component-modeling.md`).
+9. **An aggregate that moved has usually changed membership, not value** — never quote a total
+   without its count, and re-grade on the shared subset before believing any improvement. This is
+   the single most-repeated trap in `docs/measurement-discipline.md`; that file is worth a skim
+   before your first A/B, not after it.
