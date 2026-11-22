@@ -66,15 +66,26 @@ inline juce::Image adjustBrightnessContrast (const juce::Image& src, float contr
     return result;
 }
 
-// Graded variants (computed once, cached). Tune the multipliers per pedal; 1.0/1.0 = untouched.
-inline const juce::Image& knobGraded()
+// Do NOT cache images in function-local or namespace-scope statics. A static outlives the editor and is destroyed when the
+// plug-in DLL is unloaded, under the Windows loader lock. JUCE 9's Direct2D images release GPU resources in their destructor,
+// and the graphics driver can wait on its own threads, which need that same lock: the host then hangs on closing the plug-in
+// (REAPER "Unloading track", Gig Performer; see Tommy#2). The graded art is owned by GradedArt below, shared by the open
+// editors through a juce::SharedResourcePointer that the look-and-feel holds, so it is freed when the last editor closes,
+// while JUCE and the driver are still alive. The accessors return an Image by value (a cheap reference-counted handle).
+// Graded variants. Tune the multipliers per pedal; 1.0/1.0 = untouched. Computed once per open-editor lifetime.
+struct GradedArt
 {
-    static const juce::Image img = adjustBrightnessContrast (knob(), 1.0f, 1.0f);
-    return img;
-}
-inline const juce::Image& textureGraded()
+    GradedArt();
+    juce::Image knobArt, textureArt;
+};
+
+inline GradedArt::GradedArt()
+    :
+      knobArt (adjustBrightnessContrast (PedalAssets::knob (), 1.0f, 1.0f)),
+      textureArt (adjustBrightnessContrast (PedalAssets::texture (), 1.0f, 1.0f))
 {
-    static const juce::Image img = adjustBrightnessContrast (texture(), 1.0f, 1.0f);
-    return img;
 }
+
+inline juce::Image knobGraded () { return juce::SharedResourcePointer<GradedArt>()->knobArt; }
+inline juce::Image textureGraded () { return juce::SharedResourcePointer<GradedArt>()->textureArt; }
 } // namespace PedalAssets
