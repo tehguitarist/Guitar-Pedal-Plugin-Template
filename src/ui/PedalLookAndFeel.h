@@ -1,6 +1,8 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Assets.h"
+
 // All colour constants are uint32 to avoid constexpr Colour portability issues.
 // Use as juce::Colour(PedalLookAndFeel::cFoo).
 
@@ -72,6 +74,9 @@ public:
     void positionComboBoxText(juce::ComboBox& box, juce::Label& label) override;
 
 private:
+    // Keeps the graded artwork alive while an editor exists, and frees it when the last one closes (see Assets.h).
+    juce::SharedResourcePointer<PedalAssets::GradedArt> gradedArt;
+
     // Image-first helpers (draw the embedded art rotated to sliderPos; caller falls back to the
     // vector paths above when the image is missing). See src/ui/Assets.h.
     static bool drawKnobImage(juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> bounds,
